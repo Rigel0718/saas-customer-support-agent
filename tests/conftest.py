@@ -10,7 +10,7 @@ from app.api.routes import get_session
 from app.config import Settings
 from app.db import build_engine, validate_test_database
 from app.main import create_app
-from app.models import Base
+from app.models.customer import Base
 from app.seed import apply_seed, uid
 
 

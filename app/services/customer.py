@@ -4,8 +4,8 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Organization, Payment, Subscription, User
-from app.schemas import OrganizationDTO, PaymentDTO, PaymentHistoryDTO, SubscriptionDTO, UserDTO
+from app.models.customer import Organization, Payment, Subscription, User
+from app.schemas.customer import OrganizationDTO, PaymentDTO, PaymentHistoryDTO, SubscriptionDTO, UserDTO
 
 
 class CustomerError(Exception):

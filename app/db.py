@@ -1,6 +1,6 @@
 import os
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Generator
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.engine import make_url
@@ -14,7 +14,7 @@ def build_engine(url: str) -> Engine:
 
 
 @contextmanager
-def session_scope(engine: Engine) -> Iterator[Session]:
+def session_scope(engine: Engine) -> Generator[Session, None, None]:
     with Session(engine) as session:
         try:
             yield session
@@ -33,7 +33,7 @@ def validate_test_database(test_url: str, development_url: str) -> None:
 
 
 def main() -> None:
-    from app.models import Base
+    from app.models.customer import Base
 
     engine = build_engine(os.environ["DATABASE_URL"])
     try:

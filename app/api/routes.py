@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.db import session_scope
-from app.schemas import OrganizationDTO, PaymentHistoryDTO, SubscriptionDTO, UserDTO
+from app.schemas.customer import OrganizationDTO, PaymentHistoryDTO, SubscriptionDTO, UserDTO
 from app.services import customer
 
 router = APIRouter()

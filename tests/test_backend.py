@@ -9,7 +9,7 @@ from app.api.routes import get_session
 from app.config import Settings
 from app.db import session_scope, validate_test_database
 from app.main import create_app
-from app.models import Organization, Payment, Subscription, User
+from app.models.customer import Organization, Payment, Subscription, User
 from app.seed import MANIFEST, REFERENCE_TIME, apply_seed, uid
 from app.services import customer
 from tests.conftest import headers

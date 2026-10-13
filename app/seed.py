@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.db import build_engine
-from app.models import Organization, Payment, Subscription, User
+from app.models.customer import Organization, Payment, Subscription, User
 
 REFERENCE_TIME = datetime(2026, 1, 15, tzinfo=timezone.utc)
 
