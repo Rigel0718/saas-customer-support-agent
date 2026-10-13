@@ -1,5 +1,44 @@
 schema: spec-driven
 
+context: |
+  프로젝트: B2B SaaS Customer Support Agent
+
+  프로젝트의 목표는 Backend + AI Agent 서비스를 구현하고,
+  고정 Workflow Baseline과 비교하여 Agent의 효용성을 평가하는 것이다.
+
+  참고 문서:
+  - docs/mvp.md: 프로젝트 요구사항과 MVP 범위의 기준
+  - docs/sdd_workflow.md: SDD 개발 운영 방식
+  - AGENTS.md: 저장소 전체 개발 지침
+
+  기술 스택:
+  - Python 3.11+, uv
+  - FastAPI, Pydantic v2
+  - PostgreSQL, SQLAlchemy
+  - OpenAI Responses API
+  - pytest, Docker Compose
+
+  개발 원칙:
+  - Spec과 작업 결과는 한국어로 작성한다.
+  - 코드 식별자와 기술 용어는 영어를 유지한다.
+  - 동작하는 MVP와 테스트를 우선한다.
+  - 현재 Change에 필요한 기능만 구현한다.
+  - 인증·인가와 데이터 접근 통제는 Application이 담당한다.
+  - 초기 Agent는 Single Agent와 읽기 전용 Tool로 구성한다.
+  - Agent와 Workflow는 동일한 데이터와 Service Layer를 사용한다.
+  - 불필요한 인프라와 추상화를 추가하지 않는다.
+
+rules:
+  proposal:
+    - 변경 목적, 구현 범위, 제외 범위를 간결하게 작성한다.
+  specs:
+    - 요구사항은 테스트로 검증 가능한 형태로 작성한다.
+  design:
+    - 중요한 설계 결정과 책임 경계를 중심으로 작성한다.
+  tasks:
+    - 실제 구현과 테스트가 가능한 단위로 작업을 나눈다.
+
+
 # Project context (optional)
 # Add only constraints that should guide OpenSpec artifacts and workflows.
 # Include constraints an agent cannot infer by reading the code.
