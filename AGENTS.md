@@ -7,7 +7,7 @@
 핵심 목표는 동작하는 Backend + AI Agent 서비스를 구현하고, Workflow Baseline과 비교 평가하는 것이다.
 
 - `docs/mvp.md`: 프로젝트 목표, 요구사항, 범위 및 아키텍처
-- `docs/sdd-workflow.md`: SDD 기반 개발 절차
+- `docs/sdd_workflow.md`: SDD 기반 개발 절차
 - `openspec/`: Change별 명세 및 구현 작업
 
 작업을 시작하기 전에 관련 문서와 현재 Change를 확인한다.
