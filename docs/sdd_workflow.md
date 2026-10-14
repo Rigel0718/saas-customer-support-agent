@@ -35,19 +35,18 @@ SDD는 프로젝트의 목적이 아니라 **개발 수단**이다. 문서와 �
 
 **규칙:** 오래 유지될 개발 지침은 `AGENTS.md`에, 구현할 기능은 Spec에, 반복 가능한 작업 절차는 필요할 때만 Skill에 둔다. 같은 내용을 여러 문서에 복사해 관리하지 않는다.
 
-## 4. 초기 개발 단위
+## 4. 남은 개발 단위
 
 아래 목록은 **구현 관리 단위**이며 기존 MVP 계획을 변경하는 별도의 요구사항이 아니다.
 
 | Change | 범위 | 핵심 완료 조건 |
 |---|---|---|
-| `backend-foundation` | FastAPI, PostgreSQL, ORM 모델, Seed 데이터, 조회 API | 핵심 도메인 조회와 자동 테스트 통과 |
 | `support-agent` | 문의 접수, 읽기 전용 Tool, Single Agent, 진단 및 Trace | 복합 문의를 E2E로 실행하고 결과를 저장 |
 | `workflow-baseline` | LLM + 고정 Workflow 진단 | Agent와 동일한 데이터에서 비교 가능 |
 | `evaluation` | 평가 케이스, 실행기, 정확도·비용·지연시간 지표 | 비교 가능한 결과 및 실패 분석 확보 |
 | `production-readiness` | 오류 처리, 테스트 보완, Docker, README, 시연 | 다른 사람이 실행·검증할 수 있음 |
 
-**다섯 개 Change를 한 번에 상세 설계하지 않는다.** 현재 개발할 Change만 구체화한다. 구현 과정에서 더 작게 나누거나 순서를 조정할 수 있다.
+**남은 Change를 한 번에 상세 설계하지 않는다.** 현재 개발할 Change만 구체화한다. 구현 과정에서 더 작게 나누거나 순서를 조정할 수 있다.
 
 ## 5. 한 Change의 작업 절차
 
@@ -85,62 +84,7 @@ SDD는 프로젝트의 목적이 아니라 **개발 수단**이다. 문서와 �
 
 동작과 검증 결과가 확보되면 변경을 정리하고 다음 Change로 넘어간다. OpenSpec의 세부 명령 및 파일 생성 방식은 **설치한 버전의 CLI 안내를 우선**한다.
 
-## 6. 초기 설정 예시
-
-WSL2 프로젝트 루트에서 OpenSpec을 설치·초기화하는 예시다. Node.js와 npm이 준비되어 있어야 한다.
-
-```bash
-npm install -g @fission-ai/openspec@latest
-openspec init
-```
-
-초기화 시 Codex에 맞는 통합 방식을 선택하고, 실제 생성된 명령과 파일 구성을 확인한다.
-
-`openspec/config.yaml`에 넣을 수 있는 최소 프로젝트 맥락 예시:
-
-```yaml
-schema: spec-driven
-context: |
-  Project: B2B SaaS Customer Support Agent
-  Source of truth: docs/mvp.md
-  Stack: Python, FastAPI, PostgreSQL, SQLAlchemy, Pydantic,
-    OpenAI Responses API, pytest, Docker Compose
-  Principles:
-    - Prioritize a working and testable MVP.
-    - Use a single Agent and read-only tools initially.
-    - Enforce authorization in the Application, not the LLM.
-    - Avoid unnecessary abstractions and infrastructure.
-    - Compare Agent and Workflow using the same data.
-```
-
-이 설정은 **초안**이며 OpenSpec 버전별 지원 스키마는 설치 후 확인한다. `AGENTS.md` 역시 처음에는 간단하게 시작하고, 반복되는 문제가 발견될 때 개선한다.
-
-## 7. 첫 Change: `backend-foundation`
-
-첫 Spec 생성 시 전달할 요청 예시:
-
-```text
-Read docs/mvp.md and propose a change named backend-foundation.
-
-Scope:
-- FastAPI project setup
-- PostgreSQL and SQLAlchemy integration
-- User, Organization, Subscription, Payment models
-- Reproducible seed data
-- Read-only service/API endpoints
-- pytest coverage
-
-Constraints:
-- No Agent or LLM integration yet.
-- No Redis, Celery, microservices, or generic frameworks.
-- Authorization and organization data boundaries must be explicit.
-- Define observable acceptance criteria.
-- Create planning artifacts only; do not implement yet.
-```
-
-명세를 확인한 뒤 구현을 진행한다. 초기 목표는 **핵심 도메인 정보를 테스트와 API로 안정적으로 조회**하는 것이다.
-
-## 8. 직접 검토할 핵심 사항
+## 6. 직접 검토할 핵심 사항
 
 ### Backend
 
@@ -163,7 +107,7 @@ Constraints:
 - 정확도뿐 아니라 비용·지연시간·실패 원인 확인
 - 실제 측정 결과만 포트폴리오 성과로 표기
 
-## 9. 의도적으로 하지 않을 것
+## 7. 의도적으로 하지 않을 것
 
 - SDD 방법론 자체를 공부하기 위한 별도 Phase 구성
 - 시작 단계부터 방대한 `AGENTS.md` 작성
@@ -172,7 +116,7 @@ Constraints:
 - 불필요한 Skill/규칙/문서 추가
 - 단순히 AI Coding Agent로 작성했다는 사실을 성과로 포장
 
-## 10. 개발 경험 기록 — Change당 몇 줄
+## 8. 개발 경험 기록 — Change당 몇 줄
 
 Change가 끝날 때 아래 세 가지만 간단히 기록한다.
 
@@ -184,13 +128,3 @@ Change가 끝날 때 아래 세 가지만 간단히 기록한다.
 ```
 
 기록을 위한 별도 업무가 되지 않도록 한다. 추후 포트폴리오에는 **서비스의 문제 해결 성과가 중심**, SDD와 AI-assisted 개발 경험은 구현 프로세스의 보조 근거로 활용한다.
-
-## 11. 다음 채팅에서의 시작점
-
-1. 기존 `docs/mvp.md`와 이 문서를 함께 참고한다.
-2. OpenSpec + Codex 환경을 최소 설정한다.
-3. `AGENTS.md`는 필수적인 지속 규칙만 작성한다.
-4. `backend-foundation` Change의 작은 Spec을 작성·검토한다.
-5. 바로 구현·테스트에 들어간다.
-
-**판단 기준:** 이 작업이 SaaS 고객 지원 Agent의 완성도, 평가 가능성, 이력서 경쟁력을 높이는가? 그렇지 않은 문서화나 도구 설정은 후순위로 미룬다.
