@@ -1,6 +1,6 @@
 # Support Agent 설계 요약
 
-이 문서는 두 번째 Change `support-agent`의 검토용 요약이다. 요구사항의 기준은 [OpenSpec proposal](../openspec/changes/support-agent/proposal.md)과 세 capability spec이며, 상세 구현 결정은 [design.md](../openspec/changes/support-agent/design.md), 구현 순서는 [tasks.md](../openspec/changes/support-agent/tasks.md)를 따른다. 현재 단계에서는 명세·설계만 작성했고 구현하지 않았다.
+이 문서는 두 번째 Change `support-agent`의 검토용 요약이다. 요구사항의 기준은 [OpenSpec proposal](../openspec/changes/support-agent/proposal.md)과 세 capability spec이며, 상세 구현 결정은 [design.md](../openspec/changes/support-agent/design.md), 구현 순서는 [tasks.md](../openspec/changes/support-agent/tasks.md)를 따른다. support-agent 구현은 이 경계를 따른다. 실행 방법과 상태·오류 해석은 [README](../README.md#문의와-동기-agent-진단)를 참고한다.
 
 ## 1. Change 개요와 범위
 
@@ -99,4 +99,4 @@ Application이 기존 주입 Session에서 문의 생성, running claim, 종료 
 
 구현 전 검토할 결정은 동일 조직 문의/Trace 공유, 한 문의당 한 번 실행, Agent 실패의 HTTP 200 계약, LLM 대기 중 transaction 유지, running 잔존 허용이다. 정책의 초대 권한·구독 조건도 가상 서비스의 MVP 규칙으로 검토한다. 이들은 미정 항목이 아니라 이번 명세에 채택한 결정이다.
 
-환경 확인 사항은 OPENAI_MODEL/Key·SDK 기능 지원과 개발 DB 설정이다. 실제 모델의 원인 판단 품질, 지연시간/토큰 사용, 실제 데이터 도입 시 열람·보존 요구는 추가 검토가 필요하다. 이번 명세 작성은 테스트 통과나 Agent 품질을 입증하지 않는다.
+환경 확인 사항은 OPENAI_MODEL/Key·SDK 기능 지원과 개발 DB 설정이다. 실제 모델의 원인 판단 품질, 지연시간/토큰 사용, 실제 데이터 도입 시 열람·보존 요구는 추가 검토가 필요하다. 자동 테스트와 실제 모델 Smoke Test를 구분하여 보고하며, 자동 테스트 통과만으로 실제 모델 진단 품질을 입증하지 않는다.

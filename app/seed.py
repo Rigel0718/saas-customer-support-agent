@@ -30,28 +30,87 @@ USERS = [
     dict(id=uid(0x401), organization_id=uid(4), role="owner"),
 ]
 SUBSCRIPTIONS = [
-    dict(id=uid(0x501), organization_id=uid(1), plan="pro", status="active", expires_at=datetime(2026, 2, 15, tzinfo=timezone.utc)),
-    dict(id=uid(0x502), organization_id=uid(2), plan="free", status="expired", expires_at=datetime(2026, 1, 1, tzinfo=timezone.utc)),
-    dict(id=uid(0x503), organization_id=uid(3), plan="enterprise", status="past_due", expires_at=None),
+    dict(
+        id=uid(0x501),
+        organization_id=uid(1),
+        plan="pro",
+        status="active",
+        expires_at=datetime(2026, 2, 15, tzinfo=timezone.utc),
+    ),
+    dict(
+        id=uid(0x502),
+        organization_id=uid(2),
+        plan="free",
+        status="expired",
+        expires_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    ),
+    dict(
+        id=uid(0x503),
+        organization_id=uid(3),
+        plan="enterprise",
+        status="past_due",
+        expires_at=None,
+    ),
 ]
 PAYMENTS = [
-    dict(id=uid(0x601), organization_id=uid(1), status="succeeded", paid_at=REFERENCE_TIME, created_at=REFERENCE_TIME),
-    dict(id=uid(0x602), organization_id=uid(1), status="pending", paid_at=None, created_at=REFERENCE_TIME),
-    dict(id=uid(0x603), organization_id=uid(1), status="succeeded", paid_at=datetime(2025, 12, 15, tzinfo=timezone.utc), created_at=datetime(2025, 12, 15, tzinfo=timezone.utc)),
-    dict(id=uid(0x604), organization_id=uid(3), status="failed", paid_at=None, created_at=REFERENCE_TIME),
-    dict(id=uid(0x605), organization_id=uid(3), status="succeeded", paid_at=datetime(2025, 12, 15, tzinfo=timezone.utc), created_at=datetime(2025, 12, 15, tzinfo=timezone.utc)),
+    dict(
+        id=uid(0x601),
+        organization_id=uid(1),
+        status="succeeded",
+        paid_at=REFERENCE_TIME,
+        created_at=REFERENCE_TIME,
+    ),
+    dict(
+        id=uid(0x602),
+        organization_id=uid(1),
+        status="pending",
+        paid_at=None,
+        created_at=REFERENCE_TIME,
+    ),
+    dict(
+        id=uid(0x603),
+        organization_id=uid(1),
+        status="succeeded",
+        paid_at=datetime(2025, 12, 15, tzinfo=timezone.utc),
+        created_at=datetime(2025, 12, 15, tzinfo=timezone.utc),
+    ),
+    dict(
+        id=uid(0x604),
+        organization_id=uid(3),
+        status="failed",
+        paid_at=None,
+        created_at=REFERENCE_TIME,
+    ),
+    dict(
+        id=uid(0x605),
+        organization_id=uid(3),
+        status="succeeded",
+        paid_at=datetime(2025, 12, 15, tzinfo=timezone.utc),
+        created_at=datetime(2025, 12, 15, tzinfo=timezone.utc),
+    ),
 ]
-MANIFEST = [(Organization, ORGANIZATIONS), (User, USERS), (Subscription, SUBSCRIPTIONS), (Payment, PAYMENTS)]
+MANIFEST = [
+    (Organization, ORGANIZATIONS),
+    (User, USERS),
+    (Subscription, SUBSCRIPTIONS),
+    (Payment, PAYMENTS),
+]
 
 
 def apply_seed(session: Session) -> None:
     """Caller owns the transaction; only manifest primary keys are upserted."""
     for model, rows in MANIFEST:
         statement = insert(model).values(rows)
-        session.execute(statement.on_conflict_do_update(
-            index_elements=[model.id],
-            set_={column: getattr(statement.excluded, column) for column in rows[0] if column != "id"},
-        ))
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[model.id],
+                set_={
+                    column: getattr(statement.excluded, column)
+                    for column in rows[0]
+                    if column != "id"
+                },
+            )
+        )
 
 
 def main() -> None:

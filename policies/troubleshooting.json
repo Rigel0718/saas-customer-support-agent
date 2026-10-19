@@ -1,0 +1,6 @@
+{
+  "document_id": "troubleshooting",
+  "title": "구독 및 결제 문제 해결",
+  "keywords": ["구독", "결제", "만료", "초대", "active", "past_due", "expired", "canceled", "failed", "pending", "succeeded", "expires_at"],
+  "content": "초대에는 활성·미만료 구독이 필요하다. past_due/expired/canceled 상태는 구독 문제로 안내한다. 기준 UTC와 상태/expires_at이 불일치하면 관찰된 사실을 설명하고 추가 확인 또는 이관을 안내한다. failed/pending 결제만으로 구독 상태를 덮어쓰거나 결제 성공을 확정하지 않는다. succeeded 결제에는 paid_at이 있으며 failed/pending에는 없다. 구독 부재와 빈 결제 이력은 추가 확인할 수 있다. 환불 자격을 가정하거나 결제·환불·계정 변경을 수행하지 않는다."
+}
