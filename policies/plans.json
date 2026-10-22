@@ -1,0 +1,6 @@
+{
+  "document_id": "plans",
+  "title": "플랜과 팀원 제한 정책",
+  "keywords": ["플랜", "팀원", "초대", "한도", "free", "pro", "enterprise", "member_limit"],
+  "content": "free/pro/enterprise 모든 플랜에서 실효 인원 제한은 Organization.member_limit이다. 플랜별 고정 한도를 가정하지 않는다. 초대하려면 member_count < member_limit이어야 한다. 한도에 도달하면 조직 관리자에게 플랜 및 제한 확인을 요청한다. 실제 플랜 변경을 수행하지 않는다."
+}

@@ -10,7 +10,15 @@ from sqlalchemy.orm import Session
 def build_engine(url: str) -> Engine:
     if make_url(url).get_backend_name() != "postgresql":
         raise ValueError("PostgreSQL is required")
-    return create_engine(url, pool_pre_ping=True, connect_args={"options": "-c timezone=UTC"})
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_timeout=5,
+        connect_args={
+            "connect_timeout": 5,
+            "options": "-c timezone=UTC -c statement_timeout=5000 -c lock_timeout=5000",
+        },
+    )
 
 
 @contextmanager
@@ -33,7 +41,7 @@ def validate_test_database(test_url: str, development_url: str) -> None:
 
 
 def main() -> None:
-    from app.models.customer import Base
+    from app.models import Base
 
     engine = build_engine(os.environ["DATABASE_URL"])
     try:
