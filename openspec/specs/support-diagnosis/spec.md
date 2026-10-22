@@ -1,10 +1,10 @@
-# Spec Delta
+# support-diagnosis Specification
 
 ## Purpose
 
 고객 문의에 필요한 데이터와 정책을 읽기 전용 Tool로 조회하고 관찰 결과에 따라 후속 행동을 선택하는 Single Agent 진단을 제공한다. 실행은 Application의 권한·종료 통제 아래 수행하며 최종 판단의 근거와 실행 기록을 확인할 수 있게 한다.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: 관찰에 따른 Single Agent 실행
 시스템은 OpenAI Responses API 기반의 Single Agent로 문의를 진단해야 한다(MUST). 모델이 선택한 허용 Tool의 결과를 동일 실행의 다음 모델 입력으로 전달하여 추가 조회 또는 최종 판단을 선택하게 해야 한다(MUST). 고객 조회 순서를 고정 Workflow로 대신해서는 안 되며 Tool 호출과 결과는 call_id로 대응되어야 한다(MUST).
@@ -66,15 +66,23 @@ not_found는 안전한 오류 관찰, 빈 결제·정책 결과는 정상 빈 �
 - **THEN** completed로 저장하지 않고 invalid_output으로 failed 처리하며 검증 실패 Trace를 남긴다
 
 ### Requirement: 종료 조건과 실행 한도
-Application은 유효한 최종 결과가 나오면 종료하고 반복 횟수·총 Tool 호출 수·전체 실행 시간에 유한한 한도를 강제해야 한다(MUST). 기본 한도는 모델 호출 8회, Tool 호출 시도 16회, Agent 실행 60초이며 설정 가능해야 한다(MUST). 거부·불완전 응답·한도 초과·LLM 통신 오류는 실패로 종료하고 SDK 재시도로 한도를 우회해서는 안 된다(MUST).
+Application은 유효한 최종 결과가 나오면 종료하고 모델 호출 8회·Tool 호출 시도 16회 제한 및 AGENT_TIMEOUT_SECONDS=60의 Agent 실행 Budget을 기본값으로 제공하며 설정 가능해야 한다(MUST). Budget 소진을 확인하면 추가 Agent 실행을 중단하고, 진행 중인 LLM HTTP I/O에 남은 Budget에 따른 timeout 및 취소를 적용해야 한다(MUST). 동기 DB 연결·SQL 실행에는 별도의 유한 timeout을 적용해야 한다(MUST). DB 대기는 Agent Budget을 초과할 수 있고 종료 저장을 포함한 전체 HTTP 응답의 엄격한 60초 상한은 보장하지 않는다. 거부·불완전 응답·한도 초과·LLM 통신 오류는 실패로 종료하고 SDK 재시도로 한도를 우회해서는 안 된다(MUST).
 
 #### Scenario: 반복과 호출 한도
 - **WHEN** 모델이 계속 Tool을 요청하여 다음 행동이 모델 호출 또는 Tool 호출 한도를 초과한다
 - **THEN** 초과 행동을 실행하지 않고 limit_exceeded로 종료하며 그 전까지의 Trace를 보존한다
 
 #### Scenario: 시간 한도와 LLM 실패
-- **WHEN** 실행 시간이 소진되거나 LLM timeout/통신 오류/거부/불완전 응답이 발생한다
+- **WHEN** Agent Budget 소진이 확인되거나 LLM timeout/통신 오류/거부/불완전 응답이 발생한다
 - **THEN** 추가 호출을 중단하고 각각 execution_timeout, llm_error, model_refusal 또는 invalid_output으로 실패 기록을 남긴다
+
+#### Scenario: 진행 중인 LLM HTTP I/O 취소
+- **WHEN** LLM HTTP I/O 대기 중 남은 Agent Budget이 소진된다
+- **THEN** 해당 I/O를 취소하고 execution_timeout으로 종료하며 추가 LLM/Tool 호출을 시작하지 않는다
+
+#### Scenario: DB 대기의 별도 timeout
+- **WHEN** 동기 DB 연결 또는 SQL 실행 대기가 남은 Agent Budget보다 길어진다
+- **THEN** DB 대기는 별도의 유한 timeout을 따르며 DB 오류가 발생하면 support-requests의 DB 실패 계약을 적용하고, 정상 반환 후 Budget 소진을 확인하면 execution_timeout으로 추가 Agent 실행을 중단한다
 
 ### Requirement: 실행 Trace 및 비밀 정보 보호
 시스템은 시작, 각 LLM 호출의 메타데이터·사용량·소요시간, 각 Tool의 검증된 입력/관찰 또는 오류, 최종 검증·종료 이벤트를 순서대로 저장해야 한다(MUST). 제공되지 않은 usage는 null로 유지해야 한다(MUST). 인증 토큰·API Key·DB 접속 정보·SQL·스택·모델 내부 추론 원문을 Trace와 오류 응답에 저장하거나 노출해서는 안 된다(MUST).

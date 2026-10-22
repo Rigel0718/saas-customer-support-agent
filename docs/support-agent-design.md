@@ -1,6 +1,6 @@
 # Support Agent 설계 요약
 
-이 문서는 두 번째 Change `support-agent`의 검토용 요약이다. 요구사항의 기준은 [OpenSpec proposal](../openspec/changes/support-agent/proposal.md)과 세 capability spec이며, 상세 구현 결정은 [design.md](../openspec/changes/support-agent/design.md), 구현 순서는 [tasks.md](../openspec/changes/support-agent/tasks.md)를 따른다. support-agent 구현은 이 경계를 따른다. 실행 방법과 상태·오류 해석은 [README](../README.md#문의와-동기-agent-진단)를 참고한다.
+이 문서는 두 번째 Change `support-agent`의 검토용 요약이다. 요구사항의 기준은 [OpenSpec proposal](../openspec/changes/archive/2026-10-22-support-agent/proposal.md)과 세 capability spec이며, 상세 구현 결정은 [design.md](../openspec/changes/archive/2026-10-22-support-agent/design.md), 구현 순서는 [tasks.md](../openspec/changes/archive/2026-10-22-support-agent/tasks.md)를 따른다. support-agent 구현은 이 경계를 따른다. 실행 방법과 상태·오류 해석은 [README](../README.md#문의와-동기-agent-진단)를 참고한다.
 
 ## 1. Change 개요와 범위
 
@@ -54,7 +54,7 @@ Router는 HTTP 연결, Support Service는 인증 범위·실행 상태·결과 �
 | Diagnosis | outcome·요약·원인·권장 행동·관찰 근거 | 문의당 하나, outcome 제약 |
 | AgentTrace | 실행 순서·LLM 메타데이터·Tool 입력/관찰·오류·소요시간 | 문의/sequence 유일성, 문의 FK |
 
-근거는 같은 실행의 tool_result sequence와 nullable 정책 ID를 참조한다. Application이 참조와 outcome별 필수 내용을 검사한다. 모든 ORM은 공통 Base를 사용하고 모델 패키지에서 명시적으로 등록하여 DB CLI와 테스트 초기화가 같은 일곱 테이블을 생성한다. 상세 필드 계약은 [support-requests spec](../openspec/changes/support-agent/specs/support-requests/spec.md)을 따른다.
+근거는 같은 실행의 tool_result sequence와 nullable 정책 ID를 참조한다. Application이 참조와 outcome별 필수 내용을 검사한다. 모든 ORM은 공통 Base를 사용하고 모델 패키지에서 명시적으로 등록하여 DB CLI와 테스트 초기화가 같은 일곱 테이블을 생성한다. 상세 필드 계약은 [support-requests spec](../openspec/specs/support-requests/spec.md)을 따른다.
 
 ## 5. 인증·권한 및 트랜잭션 경계
 
@@ -62,7 +62,7 @@ CallerContext는 기존 Bearer 인증과 DB User로 생성한다. LLM 인자나 
 
 Application이 기존 주입 Session에서 문의 생성, running claim, 종료 저장을 각각 commit한다. 인증 조회로 autobegin이 시작된 사실을 고려하고 조회 Service/Tool에는 commit을 추가하지 않는다. 종료 상태·진단·전체 Trace는 하나의 트랜잭션으로 저장하며 실패하면 전체 rollback한다. DB 오류는 503이고 rollback 후 실패 상태/Trace 저장을 한 번 시도한다.
 
-실행 중 조회 transaction은 LLM 대기 중 유지될 수 있다. 종료 전 Trace는 메모리에만 있어 실행 중 조회는 빈 배열일 수 있다. 지속 DB 장애나 프로세스 종료 시 running만 남을 수 있으며 자동 복구는 이번 범위에 포함하지 않는다. 구체적 소유권은 [design D6](../openspec/changes/support-agent/design.md#d6-application의-트랜잭션-소유권)을 참고한다.
+실행 중 조회 transaction은 LLM 대기 중 유지될 수 있다. 종료 전 Trace는 메모리에만 있어 실행 중 조회는 빈 배열일 수 있다. 지속 DB 장애나 프로세스 종료 시 running만 남을 수 있으며 자동 복구는 이번 범위에 포함하지 않는다. 구체적 소유권은 [design D6](../openspec/changes/archive/2026-10-22-support-agent/design.md#d6-application의-트랜잭션-소유권)을 참고한다.
 
 ## 6. Agent 종료 조건과 실패 처리
 
@@ -75,7 +75,7 @@ Application이 기존 주입 Session에서 문의 생성, running claim, 종료 
 | 호출/시간 한도 초과 | 추가 행동 중단, failed |
 | DB 조회/저장 실패 | rollback, 가능한 실패 기록, HTTP 503 |
 
-기본 한도는 모델 호출 8회·Tool 시도 16회·Agent 실행 60초이며 설정 가능하다. SDK 숨은 재시도를 끄고 남은 시간에 맞춘 요청/DB timeout을 적용한다. 정상 저장된 기술 실패는 HTTP 200의 failed로 전달한다. completed 재호출은 기존 결과를 반환하고 running/failed 재호출은 409다.
+기본 한도는 모델 호출 8회·Tool 시도 16회이며 `AGENT_TIMEOUT_SECONDS=60`은 설정 가능한 Agent 실행 Budget이다. Budget 소진을 확인하면 추가 Agent 실행을 중단한다. SDK 재시도는 0이며 진행 중인 LLM HTTP I/O에는 남은 Budget에 따른 timeout·취소를 적용한다. 동기 DB 연결·SQL 실행은 별도의 유한 timeout을 사용하므로 Budget을 초과할 수 있다. 종료 저장을 포함한 전체 HTTP 응답에 엄격한 60초 상한은 보장하지 않는다. 정상 저장된 기술 실패는 HTTP 200의 failed로 전달한다. completed 재호출은 기존 결과를 반환하고 running/failed 재호출은 409다.
 
 ## 7. 주요 Design Decisions
 

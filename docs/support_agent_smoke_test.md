@@ -104,6 +104,6 @@ docker compose stop postgres
 ## 6. 구현 근거
 
 - [실행 스크립트](../scripts/support_agent_smoke.py), [자동화 검증](../tests/test_smoke_runner.py)
-- [MVP 범위](mvp.md), [현재 Change](../openspec/changes/support-agent/proposal.md)
-- [진단 계약](../openspec/changes/support-agent/specs/support-diagnosis/spec.md), [문의 계약](../openspec/changes/support-agent/specs/support-requests/spec.md)
+- [MVP 범위](mvp.md), [Archive된 Change](../openspec/changes/archive/2026-10-22-support-agent/proposal.md)
+- [진단 계약](../openspec/specs/support-diagnosis/spec.md), [문의 계약](../openspec/specs/support-requests/spec.md)
 - [설정 예시](../.env.example), [Endpoint](../app/api/support.py), [진단 및 근거 검증](../app/services/support.py)

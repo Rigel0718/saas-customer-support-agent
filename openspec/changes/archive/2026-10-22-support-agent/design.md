@@ -79,20 +79,22 @@ Session과 CallerContext는 Python 실행 경계에서만 주입한다. 실행 �
 
 ### D4. Responses Loop와 실행 제한
 
-OpenAI Python SDK의 동기 `responses.create`만 감싸는 작은 호출 함수/주입 지점을 둔다. 별도 Agents SDK나 범용 Provider interface는 필요하지 않다. 모델과 Key는 환경 설정에서 읽고 특정 모델명·가격은 이 Change에서 고정하지 않는다. 기존 `Settings(database_url, bearer_tokens)` 사용은 추가 설정의 기본값으로 유지하며 Agent 설정이 없는 경우 기존 읽기 API와 문의 접수/조회는 동작한다. 진단 시 누락 설정은 `llm_error`로 실패 저장하며 설정값은 노출하지 않는다.
+동기 Agent Loop의 작은 호출 함수/주입 지점을 유지하고, 함수 내부의 LLM HTTP I/O만 AsyncOpenAI의 `responses.create`와 `asyncio.timeout`으로 실행·취소한다. Application·Tool·SQLAlchemy Session은 동기 경계를 유지한다. 별도 Agents SDK나 범용 Provider interface는 필요하지 않다. 모델과 Key는 환경 설정에서 읽고 특정 모델명·가격은 이 Change에서 고정하지 않는다. 기존 `Settings(database_url, bearer_tokens)` 사용은 추가 설정의 기본값으로 유지하며 Agent 설정이 없는 경우 기존 읽기 API와 문의 접수/조회는 동작한다. 진단 시 누락 설정은 `llm_error`로 실패 저장하며 설정값은 노출하지 않는다.
 
 1. Application이 실행 시작을 확정한 후 monotonic deadline, 고정 기준 UTC, 문의·대상 정보를 준비한다.
 2. instructions, 누적 input, 다섯 function tools와 최종 JSON Schema를 Responses에 전달한다.
 3. 응답의 function_call을 순서대로 검증·실행한다. 각 call_id에 맞춘 function_call_output을 JSON 문자열로 생성한다. 모델이 근거를 연결할 수 있도록 관찰의 trace_sequence를 제공한다.
 4. 이전 response.output의 필요한 모든 항목(반환된 reasoning item 포함)과 Tool output을 메모리 input에 순서대로 누적하여 재호출한다. Tool 결과만 보내 맥락이 사라지는 방식은 사용하지 않는다.
 5. function_call이 있으면 그 턴의 텍스트를 최종 진단으로 확정하지 않는다. 호출이 없고 응답이 완료되었으면 최종 구조·근거를 검증하고 종료한다.
-6. refusal, incomplete, 비어 있거나 잘못된 출력, 호출/시간 한도는 즉시 종료한다. 이번 MVP는 출력 교정용 추가 재시도 루프를 두지 않는다.
+6. refusal, incomplete, 비어 있거나 잘못된 출력, 호출 한도 초과 또는 Budget 소진을 확인하면 종료한다. 이번 MVP는 출력 교정용 추가 재시도 루프를 두지 않는다.
 
 provider 저장에 의존하지 않도록 `store=false`와 수동 input 누적을 선택한다. stateless 응답의 encrypted reasoning 항목도 후속 입력에 보존하되 실행 메모리에만 둔다. 공식 문서상 `include=["reasoning.encrypted_content"]`는 호환성을 위해 허용되지만 필수는 아니다. 최종 출력은 Responses의 JSON Schema 형식과 Pydantic 검증을 사용한다. Tool 호출은 `parallel_tool_calls=false`로 단순화하되 여러 호출이 돌아온 경우에도 순차 처리한다. call_id 누락/중복으로 대응 관계를 만들 수 없는 응답은 invalid_output으로 중단한다.
 
 이 API 연결 방식은 [공식 Function calling 문서](https://developers.openai.com/api/docs/guides/function-calling)의 call_id별 결과 전달·strict Schema·reasoning item 전달 계약과 [Reasoning models 문서](https://developers.openai.com/api/docs/guides/reasoning#preserve-reasoning-without-stored-responses)의 stateless 맥락 보존을 기준으로 한다. 세부 SDK 시그니처와 선택 모델의 지원 기능은 구현 때 설치 버전으로 확인한다.
 
-기본 설정: `AGENT_MAX_STEPS=8`(모델 호출 수), `AGENT_MAX_TOOL_CALLS=16`(잘못된 호출도 포함), `AGENT_TIMEOUT_SECONDS=60`. 각 LLM 요청 timeout은 min(20초, 남은 실행 시간), SDK max_retries=0으로 둔다. 한도를 초과하는 호출을 시작하지 않고 반환 후에도 deadline을 확인한다. 여러 Tool이 있는 응답은 매 호출 전 검사한다. DB connect/statement 대기는 남은 시간에 맞는 유한 timeout으로 제한한다. 종료 저장은 Agent 60초 한도 밖에서 유한 DB timeout으로 수행한다. 총 HTTP 지연시간이 정확히 60초 이내라는 보장은 하지 않는다.
+기본 설정: `AGENT_MAX_STEPS=8`(모델 호출 수), `AGENT_MAX_TOOL_CALLS=16`(잘못된 호출도 포함), `AGENT_TIMEOUT_SECONDS=60`(Agent 실행 Budget). Loop 시작 시 monotonic deadline을 정하고 LLM/Tool 호출 전후에 남은 시간을 확인하며, 소진이 확인되면 추가 Agent 실행을 중단한다. 각 LLM 요청의 단계별 timeout은 min(20초, 남은 Budget), SDK max_retries=0으로 두고, 진행 중인 LLM HTTP I/O에는 남은 Budget에 따른 timeout과 취소를 적용한다. 이 취소는 공급자의 계산·청구 중단을 보장하지 않는다.
+
+동기 DB 연결·SQL 실행은 별도의 유한 timeout을 따른다. 연결 풀 획득·접속 timeout은 각각 5초이며 Agent Budget에 따른 취소 범위 밖이다. Tool 진입 시 SQL statement/lock timeout을 min(5초, 당시 남은 Budget)으로 설정하지만 여러 SQL 문장의 합계 상한은 아니다. 따라서 DB 대기로 Agent Budget을 초과할 수 있고, DB 오류는 기존 503/실패 저장 계약을 따른다. 동기 CPU·정책 파일 읽기 역시 강제로 선점하지 않는다. 종료 저장은 Budget 밖에서 별도 5초 DB statement/lock timeout을 사용한다. 인증·실행 시작·종료 저장을 포함한 전체 HTTP 응답 시간에 엄격한 60초 상한을 보장하지 않는다.
 
 시간·SDK 호출을 작은 함수로 주입하여 timeout/후속 관찰을 자동 테스트한다. usage는 공급자가 준 input/output/total token만 기록하며 미제공 값은 null이다. 비용 추정 및 평가 실행기는 추가하지 않는다.
 
@@ -170,7 +172,7 @@ query를 casefold/공백 정규화 후 공백 단위 토큰으로 나눈다. tit
 3. 신규 테스트와 기존 전체 pytest를 통과한 뒤 설정된 개발 환경에서 복합 문의 수동 smoke를 수행한다. 실제 호출은 이번 명세 작성 단계에서 수행하지 않는다.
 4. 코드 rollback 시 이전 Backend로 돌아갈 수 있고 지원 테이블은 보존하여 데이터 손실을 피한다. 자동 drop이나 새 migration framework는 도입하지 않는다.
 
-## Open Questions
+## 검증 및 확정 사항
 
-- 구현 환경에서 사용할 `OPENAI_MODEL`, 설치 SDK 버전 및 계정 접근 가능 여부는 구현 시작 시 확인한다. function calling/JSON Schema 지원 모델을 선택하며 이 확인은 API·데이터·작업 범위를 바꾸지 않는다.
-- 기본 실행 한도의 실제 지연시간/토큰 사용은 수동 smoke에서 확인한다. 설정값 조정은 허용하지만 무한 실행·숨은 재시도는 허용하지 않는다.
+- OpenAI SDK 2.54.0의 자동 검증과 사용자가 실행한 2026-10-22 Smoke 산출물로 Responses·Tool 호출·구조화된 진단 저장을 확인했다. Smoke의 실제 모델은 `gpt-5-mini-2025-08-07`이며 이 결과를 다른 모델·계정의 호환성으로 일반화하지 않는다.
+- 기존 `.smoke-results/run-m4e9wv6d/`의 ST-01~ST-05는 설명·근거 대조 검토를 포함해 Pass다. 검토 근거와 범위는 tasks.md에 기록한다. 이 정상 시나리오로 전체 품질·성능 또는 엄격한 실행 시간 상한을 입증하지 않는다. 설정값 조정은 허용하지만 무한 실행·숨은 재시도는 허용하지 않는다.
