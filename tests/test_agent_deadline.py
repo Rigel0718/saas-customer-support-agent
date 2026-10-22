@@ -15,9 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
-from app.agent.loop import responses_create, run_agent
-from app.agent.tools import AgentFailure
+from app.agent.loop import run_agent
 from app.config import Settings
+from app.diagnosis.llm import responses_create
+from app.diagnosis.runtime import ExecutionFailure
 from app.seed import uid
 from app.services import customer, support
 from tests.conftest import headers
@@ -51,6 +52,17 @@ class UploadTransport(httpx.AsyncBaseTransport):
 
 @contextmanager
 def local_responses(monkeypatch, mode, script=None):
+    async def prepare_sdk():
+        # 최초 Responses 지연 로딩이 짧은 Budget을 소진하면 HTTP I/O에
+        # 진입하지 못한다. 통신 없이 준비하여 실제 연결의 취소를 검증한다.
+        async with AsyncOpenAI(
+            api_key="fake-local-key",
+            base_url="http://127.0.0.1/v1",
+            http_client=httpx.AsyncClient(trust_env=False),
+        ) as client:
+            _ = client.responses
+
+    asyncio.run(prepare_sdk())
     records = []
     disconnected = Event()
     stopped = Event()
@@ -144,7 +156,7 @@ def local_responses(monkeypatch, mode, script=None):
         )
 
     with monkeypatch.context() as patch:
-        patch.setattr("app.agent.loop.AsyncOpenAI", sdk)
+        patch.setattr("app.diagnosis.llm.AsyncOpenAI", sdk)
         try:
             yield SimpleNamespace(
                 records=records,
@@ -186,15 +198,16 @@ def test_deadline_cancels_real_http_io(monkeypatch, mode):
     with local_responses(monkeypatch, mode) as server:
         traces = []
         before = time.monotonic()
-        with pytest.raises(AgentFailure, match="execution_timeout"):
+        with pytest.raises(ExecutionFailure, match="execution_timeout"):
             run_without_tools(settings(), traces)
         elapsed = time.monotonic() - before
         assert (
             elapsed < 1.7
         )  # 스케줄링·SDK 정리 여유이며 본문을 끝까지 기다리지는 않는다.
+        assert len(server.records) == 1, "취소를 검증할 HTTP 요청이 서버에 도달해야 한다"
         assert server.disconnected.wait(1), "서버에서 TCP EOF/연결 종료를 확인해야 한다"
         assert server.stopped.wait(1)
-        assert len(server.records) == 1 and server.records[0]["retry_count"] == "0"
+        assert server.records[0]["retry_count"] == "0"
         assert all(client.is_closed for client in server.clients)
         assert (
             traces[-1].event_type == "llm_response"
@@ -213,7 +226,7 @@ def test_phase_timeout_before_deadline_is_llm_error(monkeypatch):
 
     with local_responses(monkeypatch, "headers") as server:
         traces = []
-        with pytest.raises(AgentFailure, match="llm_error"):
+        with pytest.raises(ExecutionFailure, match="llm_error"):
             run_without_tools(config, traces, create=short_timeout)
         assert server.disconnected.wait(1)
         assert len(server.records) == 1 and all(
@@ -225,7 +238,7 @@ def test_phase_timeout_before_deadline_is_llm_error(monkeypatch):
 def test_sdk_http_error_has_no_retry(monkeypatch):
     with local_responses(monkeypatch, "error") as server:
         traces = []
-        with pytest.raises(AgentFailure, match="llm_error"):
+        with pytest.raises(ExecutionFailure, match="llm_error"):
             run_without_tools(settings(3), traces)
         assert len(server.records) == 1 and server.records[0]["retry_count"] == "0"
         assert all(client.is_closed for client in server.clients)
@@ -274,7 +287,7 @@ def test_http_cancel_saves_safe_failure_without_more_calls(durable_app, monkeypa
         tools.append(True)
         raise AssertionError("deadline 이후 Tool 실행")
 
-    monkeypatch.setattr("app.agent.loop.execute_tool", unexpected_tool)
+    monkeypatch.setattr("app.agent.loop.execute_observed_tool", unexpected_tool)
     with (
         local_responses(monkeypatch, "trickle") as server,
         TestClient(durable_app) as client,

@@ -4,7 +4,7 @@
 
 **프로젝트 목표**
 
-B2B SaaS 서비스의 고객 문의를 분석하고, 내부 데이터와 정책 문서를 활용해 문제의 원인을 진단하는 AI Agent 기반 고객 지원 시스템을 개발한다.
+프로젝트의 핵심 목표는 Agent와 Workflow의 Trade-off를 실증적으로 평가하여, 어떤 문제와 조건에서 어떤 아키텍처가 유리한지 판단할 Evaluation 체계를 구축하는 것이다. 이를 위해 B2B SaaS 서비스의 고객 문의를 분석하고, 내부 데이터와 정책 문서를 활용해 문제의 원인을 진단하는 Backend + Support Agent와 Workflow Baseline을 구현한다.
 
 단순한 질의응답 챗봇이 아니라, 고객의 상황에 따라 필요한 정보를 조회하고, 그 결과를 바탕으로 후속 작업을 선택하는 Agent를 구현한다.
 
@@ -92,9 +92,14 @@ MCP는 초기 필수 구성 요소에서 제외하자. 기존 `tool-mcp-skill-la
 
 ## 7. Evaluation 설계
 
-이번 프로젝트의 핵심 차별화 요소로 삼고 싶어.
+단순히 Agent가 답변을 잘하는지 확인하는 것이 아니라, **고정 Workflow와 Agent 중 어떤 방식이 어떤 문제와 조건에서 더 적합한지** 비교한다. 핵심 산출물은 다음 두 가지다.
 
-단순히 Agent가 답변을 잘하는지 확인하는 것이 아니라, **고정 Workflow와 Agent 중 어떤 방식이 어떤 문제에서 더 적합한지** 비교하자.
+- **Evaluation Framework:** 공통 비교 조건에서 평가 케이스를 실행하고 진단 품질·정책 준수·호출 수·Token 사용량·비용·지연시간·실패를 측정·채점하는 재현 가능한 평가 체계.
+- **Trade-off Analysis:** 측정 결과와 실패 사례를 바탕으로 문제 유형과 조건별 장단점 및 아키텍처 선택 근거를 정리한 분석.
+
+개발은 Support Agent → Workflow Baseline → Evaluation Framework 및 Trade-off Analysis 순서로 진행한다. 현재 `workflow-baseline` Change는 첫 고정 단계 비교 대상과 관찰·검증 기반을 제공하며, 실제 평가 데이터셋·반복 실행·채점·통계 처리·데이터 동결은 후속 Evaluation Change에서 구현한다. 비교 결과는 해당 Baseline과 현재 Agent 구현 사이의 시스템 수준 Trade-off로 해석하며, 동적 Tool 선택만의 인과적 효과나 Workflow/Agent 전체의 일반적 우열로 확대하지 않는다.
+
+평가 결과에 따라 자주 발생하는 고객 지원 케이스에 여러 Case-specific Workflow를 구성하고, LLM Router가 Workflow 또는 Agent를 선택하는 Hybrid Routing을 후속 확장으로 검토할 수 있다. Hybrid Architecture는 확정된 정답이나 현재 MVP의 필수 구현 항목이 아니다.
 
 ### 평가 대상
 

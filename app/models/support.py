@@ -18,6 +18,12 @@ class SupportRequest(Base):
         CheckConstraint(
             "char_length(content) BETWEEN 1 AND 4000", name="request_content"
         ),
+        CheckConstraint(
+            "(status = 'pending' AND execution_mode IS NULL) OR "
+            "(status IN ('running','completed','failed') AND execution_mode IS NOT NULL "
+            "AND execution_mode IN ('agent','workflow'))",
+            name="request_execution_mode",
+        ),
     )
     id: Mapped[UUID] = mapped_column(primary_key=True)
     requester_user_id: Mapped[UUID] = mapped_column(
@@ -28,6 +34,7 @@ class SupportRequest(Base):
     )
     content: Mapped[str] = mapped_column(String)
     status: Mapped[str] = mapped_column(String)
+    execution_mode: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

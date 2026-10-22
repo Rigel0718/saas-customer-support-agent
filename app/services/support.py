@@ -2,24 +2,25 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import SQLAlchemyError
-from pydantic import ValidationError
-
-from app.config import Settings
-from app.agent.loop import add_trace, run_agent
-from app.agent.tools import AgentFailure
 from sqlalchemy.orm import Session
 
+from app.agent.loop import run_agent
+from app.config import Settings
+from app.diagnosis.runtime import ExecutionFailure, add_trace
 from app.models.support import AgentTrace, Diagnosis, SupportRequest
 from app.schemas.support import (
     DiagnosisDTO,
+    ExecutionMode,
     RequestCreate,
     RequestDTO,
     TraceDTO,
     TracesDTO,
 )
 from app.services.customer import CallerContext, CustomerError, require_context
+from app.workflow.runner import run_workflow
 
 
 def utc_now() -> datetime:
@@ -119,7 +120,7 @@ def validate_diagnosis(raw: str, traces: list[TraceDTO]) -> DiagnosisDTO:
             raise ValueError("Successful observation required")
         return diagnosis
     except (ValidationError, ValueError, TypeError, KeyError):
-        raise AgentFailure("invalid_output") from None
+        raise ExecutionFailure("invalid_output") from None
 
 
 def save_terminal(
@@ -187,8 +188,11 @@ def diagnose_request(
     create: Callable | None = None,
     clock: Callable | None = None,
     now: Callable = utc_now,
+    mode: ExecutionMode = "agent",
 ) -> RequestDTO:
     require_context(context)
+    if mode not in ("agent", "workflow"):
+        raise ValueError("Invalid execution mode")
     try:
         claimed = session.execute(
             update(SupportRequest)
@@ -197,11 +201,11 @@ def diagnose_request(
                 SupportRequest.organization_id == context.organization_id,
                 SupportRequest.status == "pending",
             )
-            .values(status="running", started_at=now())
+            .values(status="running", started_at=now(), execution_mode=mode)
         )
         if claimed.rowcount == 0:
             request = get_request(session, context, request_id)
-            if request.status == "completed":
+            if request.status == "completed" and request.execution_mode == mode:
                 return request_dto(session, request)
             raise CustomerError("conflict")
         request = get_request(session, context, request_id)
@@ -221,7 +225,8 @@ def diagnose_request(
     error_code = None
     try:
         try:
-            raw = run_agent(
+            runner = run_agent if mode == "agent" else run_workflow
+            raw = runner(
                 session,
                 context,
                 target,
@@ -233,12 +238,12 @@ def diagnose_request(
             )
             try:
                 diagnosis = validate_diagnosis(raw, traces)
-            except AgentFailure:
+            except ExecutionFailure:
                 add_trace(traces, "final_result", now, error_code="invalid_output")
                 raise
             add_trace(traces, "final_result", now)
             add_trace(traces, "execution_completed", now)
-        except AgentFailure as exc:
+        except ExecutionFailure as exc:
             error_code = exc.code
             if error_code == "invalid_output" and not any(
                 trace.event_type == "final_result" for trace in traces
@@ -255,13 +260,13 @@ def diagnose_request(
         )
     except SQLAlchemyError:
         session.rollback()
-        '''
+        """
         commit 응답만 유실되었을 수 있으므로 저장된 종료 결과를 보호한다.
         즉, complete인데 네트워크등의 오류로 인해 commit에 실패한 경우를 대비하여 current.status == "running"인 경우에만 failed를 저장한다.
         이미 completed라면: 완료된 결과를 덮어쓰지 않는다.
         여전히 running이라면: database_error로 실패 저장을 시도한다.
         새 트랜잭션에서 running -> failed 저장을 한 번만 시도한다.
-        '''
+        """
         try:
             current = get_request(session, context, request_id)
             if current.status == "running":

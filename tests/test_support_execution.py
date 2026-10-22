@@ -9,7 +9,6 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.agent.tools import AgentFailure
 from app.models import (
     AgentTrace,
     Diagnosis,
@@ -20,8 +19,8 @@ from app.models import (
     Payment,
 )
 from app.schemas.support import RequestCreate
-from app.services import customer, support
 from app.seed import uid
+from app.services import customer, support
 from tests.conftest import headers
 from tests.test_agent_loop import ScriptedResponses, evidence, final, function, response
 from tests.test_support_models import NOW
@@ -252,7 +251,16 @@ def test_handled_failures(durable_app, mode, code, monkeypatch):
             )
 
 
-def test_concurrent_claim_and_running_reads(durable_app):
+@pytest.mark.parametrize(
+    "first_mode,second_mode",
+    [
+        ("agent", "workflow"),
+        ("workflow", "agent"),
+        ("workflow", "workflow"),
+        ("agent", "agent"),
+    ],
+)
+def test_concurrent_claim_and_running_reads(durable_app, first_mode, second_mode):
     entered = Event()
     release = Event()
     seen = []
@@ -270,16 +278,25 @@ def test_concurrent_claim_and_running_reads(durable_app):
         ).json()
         path = f"/support/requests/{data['id']}"
         with ThreadPoolExecutor(max_workers=2) as pool:
-            running = pool.submit(client.post, path + "/diagnose", headers=headers())
+            running = pool.submit(
+                client.post,
+                path + "/diagnose",
+                params={"mode": first_mode},
+                headers=headers(),
+            )
             assert entered.wait(5)
             try:
                 result = client.get(path, headers=headers()).json()
                 assert result["status"] == "running" and result["diagnosis"] is None
+                assert result["execution_mode"] == first_mode
                 assert client.get(path + "/traces", headers=headers()).json() == {
                     "items": []
                 }
                 competing = pool.submit(
-                    client.post, path + "/diagnose", headers=headers("admin-token")
+                    client.post,
+                    path + "/diagnose",
+                    params={"mode": second_mode},
+                    headers=headers("admin-token"),
                 )
                 assert competing.result(timeout=5).status_code == 409
             finally:
@@ -288,14 +305,15 @@ def test_concurrent_claim_and_running_reads(durable_app):
         assert seen == [1]
 
 
-def test_diagnose_scope_unauthorized_uuid(durable_app):
+@pytest.mark.parametrize("mode", ["agent", "workflow"])
+def test_diagnose_scope_unauthorized_uuid(durable_app, mode):
     fake = ScriptedResponses([])
     durable_app.state.responses_create = fake
     with TestClient(durable_app) as client:
         data = client.post(
             "/support/requests", headers=headers(), json={"content": "문의"}
         ).json()
-        path = f"/support/requests/{data['id']}/diagnose"
+        path = f"/support/requests/{data['id']}/diagnose?mode={mode}"
         assert client.post(path).status_code == 401
         a = client.post(
             path,
@@ -303,7 +321,8 @@ def test_diagnose_scope_unauthorized_uuid(durable_app):
             | {"X-Organization-ID": data["organization_id"]},
         )
         b = client.post(
-            f"/support/requests/{uuid4()}/diagnose", headers=headers("expired-token")
+            f"/support/requests/{uuid4()}/diagnose?mode={mode}",
+            headers=headers("expired-token"),
         )
         assert a.status_code == 404 and a.json() == b.json()
         assert (
@@ -316,7 +335,8 @@ def test_diagnose_scope_unauthorized_uuid(durable_app):
 @pytest.mark.parametrize(
     "fault", ["read", "flush", "commit", "persistent", "ambiguous"]
 )
-def test_database_failure_atomicity(durable_db, fault, monkeypatch):
+@pytest.mark.parametrize("mode", ["agent", "workflow"])
+def test_database_failure_atomicity(durable_db, fault, monkeypatch, mode):
     from app.config import Settings
 
     settings = Settings("unused", {})
@@ -362,12 +382,21 @@ def test_database_failure_atomicity(durable_db, fault, monkeypatch):
         fake = ScriptedResponses(
             [response([function()]), final("diagnosed", [evidence(3)])]
         )
+        if mode == "workflow":
+            fake = ScriptedResponses([final("diagnosed", [evidence(2)])])
         with pytest.raises(OperationalError):
             support.diagnose_request(
-                session, context, req.id, settings, create=fake, now=lambda: NOW
+                session,
+                context,
+                req.id,
+                settings,
+                create=fake,
+                now=lambda: NOW,
+                mode=mode,
             )
     with Session(durable_db) as other:
         stored = other.get(SupportRequest, req.id)
+        assert stored.execution_mode == mode
         result = other.scalar(
             select(Diagnosis).where(Diagnosis.support_request_id == req.id)
         )
@@ -396,7 +425,8 @@ def test_database_failure_atomicity(durable_db, fault, monkeypatch):
             assert not any(t.event_type == "execution_completed" for t in traces)
 
 
-def test_start_commit_failure_calls_no_model(durable_db, monkeypatch):
+@pytest.mark.parametrize("mode", ["agent", "workflow"])
+def test_start_commit_failure_calls_no_model(durable_db, monkeypatch, mode):
     from app.config import Settings
 
     with Session(durable_db) as session:
@@ -410,11 +440,12 @@ def test_start_commit_failure_calls_no_model(durable_db, monkeypatch):
         fake = ScriptedResponses([])
         with pytest.raises(OperationalError):
             support.diagnose_request(
-                session, ctx, req.id, Settings("unused", {}), create=fake
+                session, ctx, req.id, Settings("unused", {}), create=fake, mode=mode
             )
         assert fake.calls == []
     with Session(durable_db) as other:
         assert other.get(SupportRequest, req.id).status == "pending"
+        assert other.get(SupportRequest, req.id).execution_mode is None
 
 
 def test_creation_commit_error_is_not_durable(durable_app, durable_db, monkeypatch):
@@ -432,7 +463,8 @@ def test_creation_commit_error_is_not_durable(durable_app, durable_db, monkeypat
     monkeypatch.undo()
 
 
-def test_terminal_db_error_http_contract(durable_app, durable_db, monkeypatch):
+@pytest.mark.parametrize("mode", ["agent", "workflow"])
+def test_terminal_db_error_http_contract(durable_app, durable_db, monkeypatch, mode):
     with TestClient(durable_app) as client:
         data = client.post(
             "/support/requests", headers=headers(), json={"content": "문의"}
@@ -449,7 +481,7 @@ def test_terminal_db_error_http_contract(durable_app, durable_db, monkeypatch):
         monkeypatch.setattr(Session, "commit", fail_once)
         durable_app.state.responses_create = ScriptedResponses([final()])
         result = client.post(
-            f"/support/requests/{data['id']}/diagnose", headers=headers()
+            f"/support/requests/{data['id']}/diagnose?mode={mode}", headers=headers()
         )
         assert (
             result.status_code == 503

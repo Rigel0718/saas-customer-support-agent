@@ -5,12 +5,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.agent.loop import run_agent, responses_create
-from app.agent.tools import AgentFailure
+from app.agent.loop import run_agent
 from app.config import Settings
+from app.diagnosis.llm import responses_create
+from app.diagnosis.runtime import ExecutionFailure
 from app.schemas.support import TraceDTO
-from app.services import customer, support, policy
 from app.seed import uid
+from app.services import customer, support, policy
 from tests.test_support_models import NOW
 
 
@@ -215,7 +216,7 @@ def test_final_without_tools(session, outcome):
 )
 def test_failures(session, bad, code):
     fake = ScriptedResponses([bad])
-    with pytest.raises(AgentFailure) as exc:
+    with pytest.raises(ExecutionFailure) as exc:
         run(session, fake)
     assert exc.value.code == code and len(fake.calls) == 1
 
@@ -226,7 +227,7 @@ def test_failures(session, bad, code):
 )
 def test_invalid_references(session, bad_evidence):
     fake = ScriptedResponses([response([function()]), final("diagnosed", bad_evidence)])
-    with pytest.raises(AgentFailure, match="invalid_output"):
+    with pytest.raises(ExecutionFailure, match="invalid_output"):
         run(session, fake)
 
 
@@ -237,7 +238,7 @@ def test_successful_observation_required(session):
             final("diagnosed", [evidence(3)]),
         ]
     )
-    with pytest.raises(AgentFailure, match="invalid_output"):
+    with pytest.raises(ExecutionFailure, match="invalid_output"):
         run(session, fake)
 
 
@@ -255,7 +256,7 @@ def test_policy_ids_are_linked_to_same_trace(session):
 
 def test_duplicate_call_id_across_turns(session):
     fake = ScriptedResponses([response([function()]), response([function()])])
-    with pytest.raises(AgentFailure, match="invalid_output"):
+    with pytest.raises(ExecutionFailure, match="invalid_output"):
         run(session, fake)
     assert len(fake.calls) == 2
 
@@ -276,7 +277,7 @@ def test_call_limits(session, max_steps, max_tools, expected_calls, expected_too
     fake = ScriptedResponses(
         [response(first), response([function(call_id="c"), function(call_id="d")])]
     )
-    with pytest.raises(AgentFailure, match="limit_exceeded") as exc:
+    with pytest.raises(ExecutionFailure, match="limit_exceeded") as exc:
         run(session, fake, settings)
     assert len(fake.calls) == expected_calls
     assert (
@@ -289,7 +290,7 @@ def test_invalid_attempt_counts(session):
     fake = ScriptedResponses(
         [response([function("refund", call_id="a"), function("refund", call_id="b")])]
     )
-    with pytest.raises(AgentFailure, match="limit_exceeded") as exc:
+    with pytest.raises(ExecutionFailure, match="limit_exceeded") as exc:
         run(session, fake, replace(Settings("unused", {}), agent_max_tool_calls=1))
     assert exc.value.traces[-1].error_code == "unknown_tool"
 
@@ -302,7 +303,7 @@ def test_timeout_after_response_stops_tools(session):
         return response([function()])
 
     fake = ScriptedResponses([create])
-    with pytest.raises(AgentFailure, match="execution_timeout") as exc:
+    with pytest.raises(ExecutionFailure, match="execution_timeout") as exc:
         run(session, fake, clock=lambda: ticks[0])
     assert not any(t.event_type == "tool_result" for t in exc.value.traces)
 
@@ -318,7 +319,7 @@ def test_timeout_after_tool_stops_next_tool(session, monkeypatch):
 
     monkeypatch.setattr(customer, "get_subscription", delayed)
     fake = ScriptedResponses([response([function(call_id="a"), function(call_id="b")])])
-    with pytest.raises(AgentFailure, match="execution_timeout") as exc:
+    with pytest.raises(ExecutionFailure, match="execution_timeout") as exc:
         run(session, fake, clock=lambda: ticks[0])
     assert len([t for t in exc.value.traces if t.event_type == "tool_result"]) == 1
 
@@ -340,10 +341,10 @@ def test_llm_error_and_missing_configuration(session):
         raise RuntimeError("API KEY SECRET")
 
     fake = ScriptedResponses([fail])
-    with pytest.raises(AgentFailure, match="llm_error") as exc:
+    with pytest.raises(ExecutionFailure, match="llm_error") as exc:
         run(session, fake)
     assert exc.value.traces[-1].error_code == "llm_error"
-    with pytest.raises(AgentFailure, match="llm_error"):
+    with pytest.raises(ExecutionFailure, match="llm_error"):
         run_agent(
             session,
             customer.authenticate(session, uid(0x101)),
@@ -371,7 +372,7 @@ def test_sdk_no_retries(monkeypatch):
         async def __aexit__(self, *args):
             pass
 
-    monkeypatch.setattr("app.agent.loop.AsyncOpenAI", Client)
+    monkeypatch.setattr("app.diagnosis.llm.AsyncOpenAI", Client)
     responses_create(
         Settings("unused", {}, openai_api_key="test", openai_model="test"), timeout=7
     )
@@ -384,14 +385,14 @@ def test_policy_load_fatal(session, monkeypatch):
 
     monkeypatch.setattr(policy, "load_policies", fail)
     fake = ScriptedResponses([])
-    with pytest.raises(AgentFailure, match="tool_error"):
+    with pytest.raises(ExecutionFailure, match="tool_error"):
         run(session, fake)
     assert fake.calls == []
 
 
 def test_default_step_boundary(session):
     fake = ScriptedResponses([response([function(call_id=str(i))]) for i in range(9)])
-    with pytest.raises(AgentFailure, match="limit_exceeded") as exc:
+    with pytest.raises(ExecutionFailure, match="limit_exceeded") as exc:
         run(session, fake)
     assert len(fake.calls) == 8
     assert len([t for t in exc.value.traces if t.event_type == "tool_result"]) == 8
@@ -399,7 +400,7 @@ def test_default_step_boundary(session):
 
 def test_default_tool_boundary(session):
     fake = ScriptedResponses([response([function(call_id=str(i)) for i in range(17)])])
-    with pytest.raises(AgentFailure, match="limit_exceeded") as exc:
+    with pytest.raises(ExecutionFailure, match="limit_exceeded") as exc:
         run(session, fake)
     assert len(fake.calls) == 1
     assert len([t for t in exc.value.traces if t.event_type == "tool_result"]) == 16
@@ -418,7 +419,7 @@ def test_llm_timeout_after_budget(session):
         ticks[0] = 60
         raise TimeoutError("SECRET")
 
-    with pytest.raises(AgentFailure, match="execution_timeout") as exc:
+    with pytest.raises(ExecutionFailure, match="execution_timeout") as exc:
         run(session, ScriptedResponses([fail]), clock=lambda: ticks[0])
     assert exc.value.traces[-1].error_code == "execution_timeout"
 
