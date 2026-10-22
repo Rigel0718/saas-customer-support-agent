@@ -5,14 +5,15 @@ import pytest
 from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from app.api.routes import get_session
+from app.api.dependencies import get_session
 from app.config import Settings
 from app.db import session_scope, validate_test_database
 from app.main import create_app
 from app.models.customer import Organization, Payment, Subscription, User
-from app.seed import MANIFEST, REFERENCE_TIME, apply_seed, uid
+from app.seed import apply_seed, uid
 from app.services import customer
 from tests.conftest import headers
+from tests.test_support_models import NOW
 
 
 def paths(org=1, user=0x101):
@@ -30,7 +31,7 @@ def snapshot(session):
             tuple(getattr(row, col.name) for col in model.__table__.columns)
             for row in session.scalars(select(model).order_by(model.id))
         ]
-        for model, _ in MANIFEST
+        for model in (Organization, User, Subscription, Payment)
     }
 
 
@@ -39,13 +40,13 @@ def test_seed_reproducible_and_states(session):
     extra = Organization(id=uid(9000), name="Preserved", member_limit=0)
     session.add(extra)
     session.flush()
-    apply_seed(session)
+    apply_seed(session, reference_time=NOW)
     after = snapshot(session)
     assert after["organizations"][:-1] == before["organizations"]
     assert after["organizations"][-1][1] == "Preserved"
     for table in ("users", "subscriptions", "payments"):
         assert before[table] == after[table]
-    apply_seed(session)
+    apply_seed(session, reference_time=NOW)
     assert snapshot(session) == after
     assert {u.role for u in session.scalars(select(User))} == {
         "owner",
@@ -62,10 +63,24 @@ def test_seed_reproducible_and_states(session):
         "failed",
         "pending",
     }
-    assert session.get(Subscription, uid(0x502)).expires_at < REFERENCE_TIME
-    assert session.get(Subscription, uid(0x501)).expires_at > REFERENCE_TIME
+    assert session.get(Subscription, uid(0x502)).expires_at == NOW - timedelta(days=50)
+    assert session.get(Subscription, uid(0x501)).expires_at == NOW + timedelta(days=30)
     assert session.get(Payment, uid(0x601)).created_at.utcoffset() == timedelta(0)
-    assert session.get(Payment, uid(0x601)).created_at == REFERENCE_TIME
+    assert session.get(Payment, uid(0x601)).created_at == NOW
+
+
+def test_seed_refreshes_dates_without_duplicates(session):
+    later = NOW + timedelta(days=365)
+    apply_seed(session, reference_time=later)
+    session.expire_all()
+    assert session.get(Subscription, uid(0x501)).expires_at == later + timedelta(days=30)
+    assert session.get(Subscription, uid(0x502)).expires_at == later - timedelta(days=50)
+    assert session.get(Payment, uid(0x601)).created_at == later
+    assert session.get(Payment, uid(0x603)).paid_at == later - timedelta(days=30)
+    assert {
+        model: len(list(session.scalars(select(model))))
+        for model in (Organization, User, Subscription, Payment)
+    } == {Organization: 4, User: 6, Subscription: 3, Payment: 5}
 
 
 @pytest.mark.parametrize(
@@ -107,35 +122,35 @@ def test_seed_reproducible_and_states(session):
             organization_id=uid(9999),
             status="pending",
             paid_at=None,
-            created_at=REFERENCE_TIME,
+            created_at=NOW,
         ),
         Payment(
             id=uid(900),
             organization_id=uid(1),
             status="bad",
             paid_at=None,
-            created_at=REFERENCE_TIME,
+            created_at=NOW,
         ),
         Payment(
             id=uid(900),
             organization_id=uid(1),
             status="succeeded",
             paid_at=None,
-            created_at=REFERENCE_TIME,
+            created_at=NOW,
         ),
         Payment(
             id=uid(900),
             organization_id=uid(1),
             status="failed",
-            paid_at=REFERENCE_TIME,
-            created_at=REFERENCE_TIME,
+            paid_at=NOW,
+            created_at=NOW,
         ),
         Payment(
             id=uid(900),
             organization_id=uid(1),
             status="pending",
-            paid_at=REFERENCE_TIME,
-            created_at=REFERENCE_TIME,
+            paid_at=NOW,
+            created_at=NOW,
         ),
     ],
 )
@@ -345,7 +360,7 @@ def test_seed_transaction_rolls_back_on_failure(engine):
 
     with Session(engine) as session:
         with pytest.raises(RuntimeError), session.begin():
-            apply_seed(session)
+            apply_seed(session, reference_time=NOW)
             raise RuntimeError("abort seed")
-        for model, _ in MANIFEST:
+        for model in (Organization, User, Subscription, Payment):
             assert list(session.scalars(select(model))) == []

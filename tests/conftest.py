@@ -6,12 +6,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.api.routes import get_session
+from app.api.dependencies import get_session
 from app.config import Settings
 from app.db import build_engine, validate_test_database
 from app.main import create_app
 from app.models import Base
 from app.seed import apply_seed, uid
+from tests.test_support_models import NOW
 
 
 @pytest.fixture(scope="session")
@@ -54,7 +55,7 @@ def session(engine):
         with Session(
             bind=connection, join_transaction_mode="create_savepoint"
         ) as session:
-            apply_seed(session)
+            apply_seed(session, reference_time=NOW)
             session.flush()
             yield session
         transaction.rollback()
@@ -99,7 +100,7 @@ def durable_db(engine):
     )
 
     with Session(engine) as seed_session:
-        apply_seed(seed_session)
+        apply_seed(seed_session, reference_time=NOW)
         seed_session.commit()
     try:
         yield engine
@@ -138,7 +139,5 @@ def durable_app(durable_db):
             yield session
 
     app.dependency_overrides[get_session] = independent_session
-    from tests.test_support_models import NOW
-
     app.state.utc_now = lambda: NOW
     return app

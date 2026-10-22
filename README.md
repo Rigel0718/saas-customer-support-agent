@@ -21,7 +21,7 @@ uv run uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 
 환경 변수는 자동으로 `.env`에서 읽지 않는다. Compose만 `.env`를 읽으므로 Python 실행에는 export가 필요하다. URI 특수문자가 있는 비밀번호는 DATABASE_URL에서 percent encoding한다. PostgreSQL 호스트 포트는 POSTGRES_PORT로 변경하며 URL도 함께 맞춘다.
 
-스키마 생성과 Seed는 명시적 명령이며 서버 시작 시 실행되지 않는다. create_all은 기존 스키마 변경을 처리하지 않는다. Seed는 고정 PK만 upsert하고 다른 데이터를 삭제하지 않는다. 기준 시각은 `2026-01-15T00:00:00Z`이며 상태를 현재 시각으로 재계산하지 않는다.
+스키마 생성과 Seed는 명시적 명령이며 서버 시작 시 실행되지 않는다. create_all은 기존 스키마 변경을 처리하지 않는다. Seed는 고정 PK만 upsert하고 다른 데이터를 삭제하지 않는다. Seed 실행 당시 UTC를 기준으로 활성 구독은 30일 후 만료, 만료 구독은 50일 전 만료, 과거 성공 결제는 30일 전으로 생성한다. 재실행하면 같은 PK의 날짜도 새 기준 시각에 맞춰 갱신된다. 자동 테스트는 같은 생성 코드에 고정 기준 시각을 주입해 재현성을 유지한다.
 
 ## 조회 API
 
