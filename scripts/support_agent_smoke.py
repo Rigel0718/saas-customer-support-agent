@@ -16,8 +16,9 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 from sqlalchemy.engine import make_url
 
-from app.agent.tools import ARGUMENTS, AgentFailure
 from app.config import Settings
+from app.diagnosis.runtime import ExecutionFailure
+from app.diagnosis.tools import ARGUMENTS
 from app.schemas.support import RequestDTO, TracesDTO
 from app.services.support import validate_diagnosis
 
@@ -103,7 +104,7 @@ def assess(post: dict | None, retrieved: dict | None, traces: dict | None) -> li
                 results[2] = ["미검증", "생성·저장·근거 참조 통과; 설명과 관찰의 의미 일치는 사람 검토 필요"]
             else:
                 results[2] = ["Fail", "정상 진단이 저장되지 않음"]
-        except (ValueError, AgentFailure):
+        except (ValueError, ExecutionFailure):
             completed = False
             results[2] = ["Fail", "진단 형식 또는 근거 참조 오류"]
     events = [t.event_type for t in items]

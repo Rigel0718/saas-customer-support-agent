@@ -12,6 +12,7 @@ from pydantic import (
 )
 
 Nonempty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+ExecutionMode = Literal["agent", "workflow"]
 EventType = Literal[
     "execution_started",
     "llm_response",
@@ -69,11 +70,18 @@ class RequestDTO(Schema):
     organization_id: UUID
     content: str
     status: Literal["pending", "running", "completed", "failed"]
+    execution_mode: ExecutionMode | None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
     diagnosis: DiagnosisDTO | None
     error_code: str | None
+
+    @model_validator(mode="after")
+    def execution_state(self):
+        if (self.status == "pending") != (self.execution_mode is None):
+            raise ValueError("Execution mode must match request status")
+        return self
 
 
 class TraceDTO(Schema):

@@ -5,9 +5,11 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.exc import OperationalError
 
-from app.agent.tools import TOOL_DEFINITIONS, AgentFailure, execute_tool
-from app.services import customer, policy
+from app.agent.tools import TOOL_DEFINITIONS
+from app.diagnosis.runtime import ExecutionFailure
+from app.diagnosis.tools import execute_tool
 from app.seed import uid
+from app.services import customer, policy
 
 
 def test_policies_and_search(tmp_path):
@@ -159,10 +161,10 @@ def test_fatal_tools(session, monkeypatch, error):
         raise error
 
     monkeypatch.setattr(customer, "get_user", fail)
-    expected = OperationalError if isinstance(error, OperationalError) else AgentFailure
+    expected = OperationalError if isinstance(error, OperationalError) else ExecutionFailure
     with pytest.raises(expected) as exc:
         tool(session, "get_user", {"user_id": str(uid(0x101))})
-    if expected is AgentFailure:
+    if expected is ExecutionFailure:
         assert str(exc.value) == "tool_error"
 
 

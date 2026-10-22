@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 
 from scripts import support_agent_smoke as smoke
+from scripts.workflow_smoke import WorkflowRunner
 
 DATE = "2026-10-22T00:00:00+00:00"
 
@@ -19,7 +20,7 @@ def sample():
     request = {
         "id": "00000000-0000-0000-0000-000000000999",
         "requester_user_id": smoke.MEMBER, "organization_id": smoke.ORG,
-        "content": smoke.CONTENT, "status": "completed",
+        "content": smoke.CONTENT, "status": "completed", "execution_mode": "agent",
         "created_at": DATE, "started_at": DATE, "finished_at": DATE,
         "error_code": None,
         "diagnosis": {
@@ -107,7 +108,7 @@ class Response(BytesIO):
 @pytest.mark.parametrize("diagnose_result", ["success", "timeout", "http_error"])
 def test_runner_collects_report_and_never_retries_post(tmp_path, monkeypatch, diagnose_result):
     request, traces = sample()
-    pending = dict(request, status="pending", diagnosis=None, started_at=None, finished_at=None)
+    pending = dict(request, status="pending", execution_mode=None, diagnosis=None, started_at=None, finished_at=None)
     settings = smoke.Settings(
         "postgresql+psycopg://support:private-password@localhost/support_dev",
         {"private-bearer": UUID(smoke.MEMBER)},
@@ -193,13 +194,14 @@ def test_malformed_traces_still_produce_failed_report(tmp_path):
     assert "Trace 응답 형식 오류" in (tmp_path / "report.md").read_text()
 
 
-def test_real_backend_starts_on_reserved_socket_without_database_or_llm(tmp_path, monkeypatch):
+@pytest.mark.parametrize("runner_class", [smoke.Runner, WorkflowRunner])
+def test_real_backend_starts_on_reserved_socket_without_database_or_llm(tmp_path, monkeypatch, runner_class):
     monkeypatch.setenv(
         "DATABASE_URL", "postgresql+psycopg://support:unused@127.0.0.1:1/unused"
     )
     monkeypatch.setenv("OPENAI_API_KEY", "")
     monkeypatch.setenv("OPENAI_MODEL", "")
-    runner = smoke.Runner(tmp_path)
+    runner = runner_class(tmp_path)
     runner.settings = smoke.Settings(
         "postgresql+psycopg://support:unused@127.0.0.1:1/unused", {}
     )

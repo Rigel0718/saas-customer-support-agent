@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request
 
 from app.api.dependencies import ContextDep, SessionDep
-from app.schemas.support import RequestCreate, RequestDTO, TracesDTO
+from app.schemas.support import ExecutionMode, RequestCreate, RequestDTO, TracesDTO
 from app.services import support
 
 router = APIRouter(prefix="/support/requests")
@@ -28,7 +28,11 @@ def traces(request_id: UUID, session: SessionDep, context: ContextDep):
 
 @router.post("/{request_id}/diagnose", response_model=RequestDTO)
 def diagnose(
-    request_id: UUID, session: SessionDep, context: ContextDep, request: Request
+    request_id: UUID,
+    session: SessionDep,
+    context: ContextDep,
+    request: Request,
+    mode: ExecutionMode = "agent",
 ):
     return support.diagnose_request(
         session,
@@ -37,4 +41,5 @@ def diagnose(
         request.app.state.settings,
         create=getattr(request.app.state, "responses_create", None),
         now=getattr(request.app.state, "utc_now", support.utc_now),
+        mode=mode,
     )

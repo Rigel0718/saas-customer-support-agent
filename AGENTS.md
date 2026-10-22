@@ -4,7 +4,7 @@
 
 이 저장소는 B2B SaaS Customer Support Agent를 개발하는 프로젝트다.
 
-핵심 목표는 동작하는 Backend + AI Agent 서비스를 구현하고, Workflow Baseline과 비교 평가하는 것이다.
+핵심 목표는 Agent와 Workflow의 Trade-off를 실증적으로 평가하여, 어떤 문제와 조건에서 어떤 아키텍처가 유리한지 판단할 Evaluation 체계를 구축하는 것이다.
 
 - `docs/mvp.md`: 프로젝트 목표, 요구사항, 범위 및 아키텍처
 - `docs/sdd_workflow.md`: SDD 기반 개발 절차
