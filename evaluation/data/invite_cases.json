@@ -1,0 +1,141 @@
+{
+  "dataset_version": "invite-v1",
+  "content": "팀원을 초대하려고 하는데 계속 실패합니다. 무엇이 문제인지 확인해 주세요.",
+  "cases": [
+    {
+      "case_id": "C01",
+      "requester_role": "member",
+      "member_limit": 3,
+      "users": [
+        {
+          "key": "requester",
+          "role": "member"
+        },
+        {
+          "key": "owner",
+          "role": "owner"
+        }
+      ],
+      "subscription": {
+        "plan": "pro",
+        "status": "active",
+        "expires_offset_days": 30
+      },
+      "payments": [
+        {
+          "status": "succeeded",
+          "created_offset_days": -60,
+          "paid_offset_days": -60
+        }
+      ]
+    },
+    {
+      "case_id": "C02",
+      "requester_role": "admin",
+      "member_limit": 2,
+      "users": [
+        {
+          "key": "requester",
+          "role": "admin"
+        },
+        {
+          "key": "owner",
+          "role": "owner"
+        }
+      ],
+      "subscription": {
+        "plan": "pro",
+        "status": "active",
+        "expires_offset_days": 30
+      },
+      "payments": [
+        {
+          "status": "succeeded",
+          "created_offset_days": -60,
+          "paid_offset_days": -60
+        }
+      ]
+    },
+    {
+      "case_id": "C03",
+      "requester_role": "admin",
+      "member_limit": 3,
+      "users": [
+        {
+          "key": "requester",
+          "role": "admin"
+        },
+        {
+          "key": "owner",
+          "role": "owner"
+        }
+      ],
+      "subscription": {
+        "plan": "pro",
+        "status": "expired",
+        "expires_offset_days": -30
+      },
+      "payments": [
+        {
+          "status": "succeeded",
+          "created_offset_days": -60,
+          "paid_offset_days": -60
+        }
+      ]
+    },
+    {
+      "case_id": "C04",
+      "requester_role": "admin",
+      "member_limit": 3,
+      "users": [
+        {
+          "key": "requester",
+          "role": "admin"
+        },
+        {
+          "key": "owner",
+          "role": "owner"
+        }
+      ],
+      "subscription": {
+        "plan": "pro",
+        "status": "active",
+        "expires_offset_days": 30
+      },
+      "payments": [
+        {
+          "status": "succeeded",
+          "created_offset_days": -60,
+          "paid_offset_days": -60
+        }
+      ]
+    },
+    {
+      "case_id": "C05",
+      "requester_role": "member",
+      "member_limit": 2,
+      "users": [
+        {
+          "key": "requester",
+          "role": "member"
+        },
+        {
+          "key": "owner",
+          "role": "owner"
+        }
+      ],
+      "subscription": {
+        "plan": "pro",
+        "status": "expired",
+        "expires_offset_days": -30
+      },
+      "payments": [
+        {
+          "status": "succeeded",
+          "created_offset_days": -60,
+          "paid_offset_days": -60
+        }
+      ]
+    }
+  ]
+}

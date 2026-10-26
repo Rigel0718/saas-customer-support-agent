@@ -1,0 +1,8 @@
+{
+  "pricing_version": "unconfigured-v1",
+  "as_of": null,
+  "currency": "USD",
+  "source": null,
+  "assumptions": "Input at uncached list rate. No discounts, cache adjustment, taxes or negotiated rates. Estimate, not billed cost. USD rounded to 12 decimal places using ROUND_HALF_EVEN.",
+  "models": {}
+}

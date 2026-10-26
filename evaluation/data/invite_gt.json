@@ -1,0 +1,123 @@
+{
+  "gt_version": "invite-gt-v1",
+  "cases": [
+    {
+      "case_id": "C01",
+      "expected_outcome": "diagnosed",
+      "primary_causes": [
+        "permission_denied"
+      ],
+      "excluded_causes": [
+        "confirmed_service_outage",
+        "member_limit_reached",
+        "payment_failed",
+        "subscription_expired"
+      ],
+      "required_facts": [
+        "요청자는 member이며 초대 권한이 없다.",
+        "활성 미만료 구독이며 인원은 2명/한도 3명이다.",
+        "60일 전 동일한 성공 결제 이력이 있으며 결제 실패는 관찰되지 않았다."
+      ],
+      "policy_document_ids": [
+        "permissions",
+        "plans",
+        "troubleshooting"
+      ]
+    },
+    {
+      "case_id": "C02",
+      "expected_outcome": "diagnosed",
+      "primary_causes": [
+        "member_limit_reached"
+      ],
+      "excluded_causes": [
+        "confirmed_service_outage",
+        "payment_failed",
+        "permission_denied",
+        "subscription_expired"
+      ],
+      "required_facts": [
+        "요청자는 admin이다.",
+        "현재 2명이 실효 한도 2명에 도달했다.",
+        "구독은 활성 미만료다.",
+        "60일 전 동일한 성공 결제 이력이 있으며 결제 실패는 관찰되지 않았다."
+      ],
+      "policy_document_ids": [
+        "permissions",
+        "plans",
+        "troubleshooting"
+      ]
+    },
+    {
+      "case_id": "C03",
+      "expected_outcome": "diagnosed",
+      "primary_causes": [
+        "subscription_expired"
+      ],
+      "excluded_causes": [
+        "confirmed_service_outage",
+        "member_limit_reached",
+        "payment_failed",
+        "permission_denied"
+      ],
+      "required_facts": [
+        "요청자는 admin이며 인원은 2명/한도 3명이다.",
+        "구독 status=expired이며 만료일은 기준 UTC보다 30일 전이다.",
+        "60일 전 동일한 성공 결제 이력이 있으며 결제 실패는 관찰되지 않았다."
+      ],
+      "policy_document_ids": [
+        "permissions",
+        "plans",
+        "troubleshooting"
+      ]
+    },
+    {
+      "case_id": "C04",
+      "expected_outcome": "needs_information",
+      "primary_causes": [],
+      "excluded_causes": [
+        "confirmed_service_outage",
+        "member_limit_reached",
+        "payment_failed",
+        "permission_denied",
+        "subscription_expired"
+      ],
+      "required_facts": [
+        "요청자는 초대 권한이 있는 admin이다.",
+        "구독은 active이며 기준 UTC보다 30일 후 만료한다.",
+        "현재 인원 2명은 실효 한도 3명보다 적다.",
+        "현재 정보로 실패 원인을 확정할 수 없어 추가 정보가 필요하다.",
+        "60일 전 동일한 성공 결제 이력이 있으며 결제 실패는 관찰되지 않았다."
+      ],
+      "policy_document_ids": [
+        "permissions",
+        "plans",
+        "troubleshooting"
+      ]
+    },
+    {
+      "case_id": "C05",
+      "expected_outcome": "diagnosed",
+      "primary_causes": [
+        "permission_denied",
+        "member_limit_reached",
+        "subscription_expired"
+      ],
+      "excluded_causes": [
+        "confirmed_service_outage",
+        "payment_failed"
+      ],
+      "required_facts": [
+        "요청자는 member라 초대 권한이 없다.",
+        "현재 2명이 실효 한도 2명에 도달했다.",
+        "구독 status=expired이며 만료일은 기준 UTC보다 30일 전이다.",
+        "60일 전 동일한 성공 결제 이력이 있으며 결제 실패는 관찰되지 않았다."
+      ],
+      "policy_document_ids": [
+        "permissions",
+        "plans",
+        "troubleshooting"
+      ]
+    }
+  ]
+}
