@@ -40,7 +40,37 @@ Runner는 DB 자체를 생성하지 않는다. `DATABASE_URL`, `TEST_DATABASE_UR
 
 각 run은 UUID로 만든 `eval_<uuid hex>` schema에 일곱 기존 ORM 테이블을 생성한다. 기존 schema를 재사용하지 않고 개발 Seed도 적용하지 않는다. Fixture insert는 하나의 트랜잭션이며 실패 시 rollback한다. 기존 데이터의 삭제/초기화와 자동 정리는 없다. 정상·실패 schema 모두 보존하며 manifest의 run_id/schema를 대조해 운영자가 별도로 수동 정리한다. schema 준비 중 실패해도 생성된 schema는 남을 수 있다. Fixture/정책/시간 조건이 바뀌면 후속 진단을 중단하고 해당 run을 invalid_environment로 취급한다. 실패 run을 재개하거나 같은 schema로 재시도하지 않는다.
 
-## 원본 파일과 실행 상태
+## 기존 DB의 Trace migration
+
+기존 API DB에서 새 코드를 사용하기 전에는 `migrations/002_llm_trace_metadata.sql`을 해당 DB에 수동 적용한다. 이 SQL은 `agent_traces.llm_metadata` nullable JSONB 열만 추가하며 backfill이나 기존 데이터 변경은 없다. 애플리케이션 시작 시 자동 실행하지 않는다. 새 테스트/Evaluation schema는 ORM 초기화로 해당 열을 생성하므로 별도 적용이 필요하지 않다. 과거 Pilot schema나 결과 파일을 이 작업으로 변경하지 않는다. 코드 rollback 시 추가 열은 그대로 두어 기록을 보존한다.
+
+## 진단 Timeout 설정과 LLM 오류 확인
+
+| 설정 | 우선순위 | 기본값 |
+|---|---|---|
+| 개별 LLM 요청 Timeout | `run --llm-request-timeout-seconds` → `LLM_REQUEST_TIMEOUT_SECONDS` | 20초 |
+| Agent 실행 Budget | `run --execution-timeout-seconds` → `AGENT_TIMEOUT_SECONDS` | 60초 |
+| Workflow 실행 Budget | `run --execution-timeout-seconds` → `WORKFLOW_TIMEOUT_SECONDS` | 60초 |
+
+선택된 값은 양의 유한 숫자여야 한다. 명시 옵션은 같은 설정의 환경변수를 덮어쓰며 하위 값을 파싱하지 않는다. Evaluation에서 두 모드의 최종 Budget이 다르면 DB/Fixture/결과 디렉터리 생성 전에 `unequal_execution_budgets_use_--execution-timeout-seconds`로 중단한다. API의 모드별 Budget 설정은 기존처럼 독립적이다. 이 옵션들은 `run`의 진단에만 적용하고 `plan`·Judge·Calibration 설정은 바꾸지 않는다. 실제 진단 허용 옵션도 계속 필요하다.
+
+개별 요청에는 설정 Timeout과 남은 실행 Budget 중 작은 값을 전달한다. SDK의 HTTP I/O Timeout과 전체 실행 Budget에 따른 취소는 별도다. Budget 소진 전 요청 Timeout/연결/HTTP 오류는 `llm_error`, 전체 Budget 소진은 `execution_timeout`이며 SDK 재시도는 0회다. DB 대기·종료 저장까지 포함한 전체 응답의 엄격한 wall-clock 상한을 뜻하지 않는다.
+
+새 manifest의 `configuration.llm_request_timeout_seconds`, `agent_timeout_seconds`, `workflow_timeout_seconds`에는 실제 해석한 설정값을 기록한다. 각 `llm_response.llm_metadata.request_timeout_seconds`에는 해당 요청에 전달한 값을 남긴다. 예를 들어 설정 40초·잔여 Budget 6초이면 manifest는 40, 해당 Trace는 6이다. 성공·실패 모두 확인할 수 있다.
+
+`llm_error`의 `llm_metadata.error`는 `exception_type`, `is_timeout`, `http_status`만 담는다. 예외 타입은 고정 허용 목록이며 미분류 예외는 `UnknownError`, HTTP Status 미확인은 null이다. `is_timeout=false`는 알려진 Timeout을 감지하지 않았다는 뜻이다. 예외 메시지·본문·Header·URL·스택·키는 기록하지 않는다. 정상 응답 및 다른 오류 코드의 `error`는 null이고 LLM 이외의 Trace는 `llm_metadata=null`이다.
+
+결과 버전은 additive 확장으로 `evaluation-v1`을 유지한다. 새 Reader는 과거 결과를 읽을 수 있으나 누락 메타데이터/설정을 시간이나 새 기본값으로 추정하지 않는다. 원본 Pilot 파일은 수정하지 않는다. 새 Trace 필드를 모르는 이전 Reader는 새 결과를 거부할 수 있으므로 새 결과는 변경 이후 코드로 읽는다.
+
+다음은 설정 예시이며 실제 호출을 허용할 때만 수동 실행한다. 기존 run 경로는 덮어쓰지 않고 새 경로를 사용한다.
+
+```bash
+uv run --env-file .env python -m scripts.evaluate run --repetitions 1 --llm-request-timeout-seconds 40 --execution-timeout-seconds 90 --output-dir .evaluation-results/invite-timeout-40 --allow-live-diagnosis
+```
+
+외부 호출 없이 추가 회귀 테스트를 실행하려면 `.venv/bin/python -m pytest tests/test_llm_reliability.py tests/test_evaluation_timeouts.py -q`를 사용한다. 저장/migration/CLI 통합 테스트는 기존 격리된 테스트 DB 환경변수를 준비한 뒤 `tests/test_llm_trace_storage.py tests/test_evaluation_timeout_integration.py`를 추가한다. 테스트는 Fake Client와 합성 예외를 사용한다.
+
+## 원본 실행 기록 해석
 
 run 생성 시 `manifest.json`, `executions.json`, `judgments.json`, `summary.json` 네 파일을 만든다. manifest는 코드 revision/dirty와 관련 코드·Prompt hash, Dataset/GT/정책 snapshot/hash, 기준 UTC, 모드 순서, 모델·한도, 가격표, DB schema를 남긴다. Settings 전체·접속 URL·키·Bearer는 직렬화하지 않는다. executions는 계획과 원본 Diagnosis/Trace 및 오류 영역을 보존한다. executions/manifest는 매 실행마다 임시 파일을 atomic replace하지만 네 파일 전체의 원자성을 보장하지는 않는다. 파일 오류/중단 때 이미 저장한 완료분과 미시작 계획은 유지되며 ID/버전 연결을 검사한다. 수집 완료 후 executions는 수정하지 않는다. 첫 채점은 미채점 judgments/summary만 확정하고 이후 변경은 별도 재채점 디렉터리에 저장한다.
 
@@ -58,9 +88,17 @@ Diagnosis Correctness는 correct/(correct+incorrect), Execution Success는 compl
 
 진단 수집을 마친 뒤 별도 명령으로 채점한다. Judge 입력은 GT의 expected_outcome/primary_causes/excluded_causes/required_facts와 Diagnosis의 summary/causes뿐이다. 모드/Case ID/실행 ID/다른 답변/Trace/비용/next_actions/evidence/실제 outcome은 보내지 않는다. 의미 판정과 별도로 Python에서 outcome_match를 검사한다. Diagnosis 없음은 not_applicable, Judge 통신·형식 오류는 judge_failed/pending이다. 기술 실패는 outcome 불일치가 있어도 pending으로 보존한다. 유효한 Judge 응답에서는 outcome 불일치가 최종 incorrect에 우선한다. missing_facts는 참고용이며 생략만으로 오답 처리하지 않는다. 필수 사실 모순을 오답 근거로 쓸 때는 reason에서 해당 주장과 GT를 대조한다.
 
-`evaluation/data/judge_calibration.json`의 15개 예제는 초기 작성본이다. human label/reason/reviewer/review_version은 비어 있으며 사람이 Judge 실행 전에 GT와 예제를 검토해 직접 채운다. correct/incorrect/review_required 세 label을 모두 사용하고 대표 예제 검토 완료 후 examples_reviewed=true, examples_reviewer, examples_review_version을 기록한다. AI/Fake 응답을 사람 판정으로 복사하지 않는다. 사람 label이 미완성이라도 Calibration 원본·잠정 Judge 판정은 보존하되 uncalibrated다. 모호한 의미의 review_required는 확정된 사람 label로 인정한다.
+Calibration v2의 입력은 `evaluation/data/judge_calibration_v2.json`이다. 기존 `judge_calibration.json`의 K01~K15 Diagnosis와 Human Label·개별 검토 기록을 그대로 보존하며, 현재 correct 8건/incorrect 7건이다. 최소 15건·C01~C05, 동의 표현·사실 생략/모순·원인 누락·추가 오답·C04 단정/추가 정보 요청·C05 복합 원인과 세 종류의 핵심 오답을 필수로 검토한다. 확정 correct/incorrect Label은 필수지만 review_required와 ambiguous 시나리오는 필수가 아니다. 유효한 review_required Human Label이 있으면 기존처럼 일치율 분모와 혼동표에 포함한다. AI/Fake 응답을 사람 판정으로 복사하지 않는다.
+
+K16은 미확정인 `evaluation/data/judge_calibration_k16_draft.json`에 분리 보존하며 Calibration 입력에 포함하지 않는다. K17은 추가하지 않았다. 사용자는 K01~K15의 기존 Label과 K12의 보완된 판정 이유를 최종 승인하여 `examples_reviewed=true`, `examples_review_version=human-review-v2`를 기록했다. 실제 전체 검토자의 식별자는 제공되지 않아 `examples_reviewer=null`을 유지한다. 기존 pollux/rigel 기록으로 현재 검토자를 추정하지 않는다. 승인 여부와 검토자 식별은 별개이며, 실행 전 실제 검토자를 확인해 기록해야 Calibration 검토 메타데이터가 완성된다. 조건 변경이나 코드 테스트 통과를 사람 검토 완료로 기록하지 않는다. 개별 v1 검토 기록은 보존한다. 미완성 Label·검토 메타데이터가 있으면 잠정 결과는 보존하되 uncalibrated다.
 
 Calibration 일치율은 전체 확정 Human Label 수를 분모로 하며 Judge 실패를 분모에서 빼지 않는다. 혼동표, 항목 원문·불일치·기술 실패, 핵심 오답의 false-correct 수와 버전을 확인한다. 대표 예제/Human Label 검토 완료, 기술 실패 0, 일치율 ≥90%, 지정 원인 누락·추가 오답·C04 단정 예제의 false-correct 0일 때만 calibrated다. 모델·실제 응답 모델·Prompt/Rubric/GT 버전이 바뀌면 적용하지 않는다. calibrated는 해당 Set·버전의 초기 검토 통과일 뿐 일반적 Judge 정확성이나 실제 평가 품질을 보장하지 않는다. 미완료/기준 미달 시 잠정 결과를 보존하되 품질 결론은 보류한다. review_required/pending, 사람 불일치, 핵심 오답, 사실 모순 reason을 우선 검토한다. Judge의 usage/Latency/추정비용은 judgments.items[].overhead에 진단 비용과 별도로 저장한다.
+
+새 결과에는 `criteria_version=invitation-calibration-criteria-v2`와 `coverage.human_label_counts`(확정 Human Label별 사례 수), `coverage.unassessed_verdicts`(기준 사례 수 0인 유형), `limitation`을 기록한다. 이 정보는 채점 시 judgments/summary의 calibration에도 전달한다. 현재 15건에는 review_required 기준 사례가 없으므로 해당 유형의 의미 분류 성능은 검증되지 않았다. Judge가 review_required를 출력한 횟수는 Human Label의 검증 범위를 대신하지 않는다. 기준 사례가 있는 유형도 작은 Set에서의 비교일 뿐 일반적인 성능 보장이 아니다.
+
+실제 Judge의 review_required는 기존처럼 별도 저장·집계하고 correct/(correct+incorrect)의 분모에서 제외한다. 사람이 해당 execution_id의 원본 Diagnosis와 GT, Judge reason을 검토한다. 별도 자동 승인·재분류 또는 새로운 Review UI를 추가하지 않는다. `quality_conclusion_ready=true`도 해당 Set·버전·표시된 검증 범위 내 검토 통과를 뜻하며 모든 판정 유형의 품질을 보장하지 않는다.
+
+이전 Calibration 결과는 새 기준으로 재계산하거나 자동 승격하지 않는다. 이전 결과에 criteria_version/coverage가 없으면 적용 정보에 null과 미기록 한계를 표시하며 새 검증 범위를 추정하지 않는다. 기존 파일은 수정하지 않는다. 입력의 calibration_version, 검토의 examples_review_version, 통과 조건의 criteria_version은 서로 다른 버전이고, JSON 형식 schema_version은 additive 확장으로 calibration-v1을 유지한다.
 
 ## 매번 사용하는 평가 실행 명령
 
@@ -71,14 +109,20 @@ uv run --env-file .env python -m scripts.evaluate --help
 uv run --env-file .env python -m scripts.evaluate plan --repetitions 1
 uv run --env-file .env python -m scripts.evaluate plan --repetitions 5
 uv run --env-file .env python -m scripts.evaluate run --repetitions 1 --output-dir .evaluation-results/invite-10 --allow-live-diagnosis
-uv run --env-file .env python -m scripts.evaluate calibrate --output .evaluation-results/calibration-v1.json --allow-live-judge
-uv run --env-file .env python -m scripts.evaluate judge --run-dir .evaluation-results/invite-10 --calibration-result .evaluation-results/calibration-v1.json --allow-live-judge
+uv run --env-file .env python -m scripts.evaluate calibrate --calibration-file evaluation/data/judge_calibration_v2.json --output .evaluation-results/calibration-v2.json --allow-live-judge
+uv run --env-file .env python -m scripts.evaluate judge --run-dir .evaluation-results/invite-10 --calibration-result .evaluation-results/calibration-v2.json --allow-live-judge
 uv run --env-file .env python -m scripts.evaluate run --repetitions 5 --output-dir .evaluation-results/invite-50 --allow-live-diagnosis
-uv run --env-file .env python -m scripts.evaluate judge --run-dir .evaluation-results/invite-50 --calibration-result .evaluation-results/calibration-v1.json --allow-live-judge
-uv run --env-file .env python -m scripts.evaluate judge --run-dir .evaluation-results/invite-10 --regrade --calibration-result .evaluation-results/calibration-v1.json --allow-live-judge
+uv run --env-file .env python -m scripts.evaluate judge --run-dir .evaluation-results/invite-50 --calibration-result .evaluation-results/calibration-v2.json --allow-live-judge
+uv run --env-file .env python -m scripts.evaluate judge --run-dir .evaluation-results/invite-10 --regrade --calibration-result .evaluation-results/calibration-v2.json --allow-live-judge
 ```
 
-먼저 15개 예제의 사람 label을 확정하고 Calibration을 실행한다. 결과를 검토한 뒤 독립 Judge 채점을 수행한다. 위 고정 출력 경로는 최초 실행 예시이며, 재수집에는 새 디렉터리, Calibration 재실행에는 새 파일 이름을 지정한다.
+먼저 위 Human Review를 완료하고 별도 실제 호출 승인 후 Calibration을 실행한다. 결과의 status/reviewed, 일치율·기술 실패·critical_false_correct, 기준 버전·coverage·limitation을 확인한 뒤 독립 Judge 채점을 수행한다. 위 고정 출력 경로는 최초 실행 예시이며, 재수집에는 새 디렉터리, Calibration 재실행에는 새 파일 이름을 지정한다. 기존 calibration-v1.json이나 Pilot 결과를 덮어쓰지 않는다.
+
+기존 Pilot v2 네 파일까지 보존하려면 다음처럼 첫 채점에도 `--regrade`를 사용한다. 새 채점 결과는 `invite-10-v2/regrades/<judgment_set_id>/`에 저장된다. 아래 명령은 실행 가이드이며 구현 검증 중 실행하지 않는다.
+
+```bash
+uv run --env-file .env python -m scripts.evaluate judge --run-dir .evaluation-results/invite-10-v2 --regrade --calibration-result .evaluation-results/calibration-v2.json --allow-live-judge
+```
 
 `--dataset`, `--gt`, `--pricing`으로 버전을 관리한 별도 JSON을 지정할 수 있다. GT 변경 후에는 `judge --regrade --gt <path>`를 사용하고 원본과 새 GT의 비교 제약을 확인한다. 재채점은 `regrades/<judgment_set_id>/`에 네 JSON과 source hash를 생성하며 진단 DB/API를 호출하지 않는다. executions의 원본 측정값을 유지하고 새 단가에 따른 파생 집계는 summary의 metrics_pricing_version으로 구분한다. 모델·단가·GT 변경을 기록하며 원본 judgments/summary를 덮어쓰지 않는다.
 
@@ -153,3 +197,15 @@ Dataset/GT 형식·조건 대응, DB 격리/비파괴/commit, 원본 atomic 저�
 실제 OpenAI 진단/Judge 호출, 실제 모델·가격 검증, 사람 Calibration label 확정, 실제 Evaluation 10/50건과 품질·효율 측정은 수행하지 않았다. 초기 기존 DB 연결 실패의 traceback에 접속 설정이 포함되어 이후 테스트 출력은 `--tb=no`로 제한했다. 이 옵션만으로 Secret 보호가 완료된 것은 아니며, CLI 경계와 pytest DB fixture의 보호 범위는 위 설명을 따른다.
 
 Runbook/Secret 보완에서는 `.env`를 로딩하지 않고 합성 Credential과 Mock만 사용해 CLI 관련 14개 테스트가 통과했다(신규 DB 실패 5개 포함). `--tb=no` 없이 stdout·stderr·로그·결과 JSON의 Credential 비노출과 문서의 CLI 인자 구문을 검증했다. 기존 오류 변환이 검증을 통과해 제품 코드는 변경하지 않았다. DB 통합 테스트 3개와 전체 회귀 테스트는 이번 보완에서 재실행하지 않았다. 기존 Starlette/httpx 사용 중단 경고 1건이 남아 있다. 실제 DB 준비 명령과 OpenAI/Evaluation 실행은 수행하지 않았다.
+
+## Calibration v2 구현 검증 기록 (2026-10-27)
+
+`.env`를 로딩하거나 열람하지 않고 기존 API Key·DB 설정을 테스트 프로세스에서 제거한 뒤 Fake/Mock 검증을 수행했다. Judge·Metrics·CLI·Results·Dataset 관련 테스트는 81개 통과, DB가 필요한 기존 3개는 이 실행에서 제외했다. 다음 명령은 외부 호출 없이 재현할 수 있다.
+
+```bash
+env -u OPENAI_API_KEY -u DATABASE_URL -u TEST_DATABASE_URL -u EVALUATION_DATABASE_URL .venv/bin/python -m pytest tests/test_evaluation_judge.py tests/test_evaluation_metrics.py tests/test_evaluation_cli.py tests/test_evaluation_results.py tests/test_evaluation_dataset.py -q --tb=short -k 'not fake_full_collection_grading_and_independent_regrade and not regrade_duplicate_rejected_and_judge_failures_preserved'
+```
+
+전체 테스트도 같은 환경에서 `pytest -q --tb=line -ra`로 실행했다. 결과는 **228 passed, 27 failed, 272 errors**이며 전체 통과가 아니다. 272건은 격리된 테스트 DB 설정 부재에 따른 fixture 준비 오류다. 27건은 이 환경의 TCP 소켓 생성 금지로 발생한 deadline/smoke 실패와 그에 따른 미생성 실행 상태 참조 실패다. Docker 소켓 접근도 차단되어 별도 테스트 DB를 준비할 수 없었다. DB·localhost TCP가 허용되는 환경에서 전체 테스트를 다시 실행해야 한다. 기존 Starlette/httpx 사용 중단 경고 1건이 있다.
+
+기존 Calibration/Pilot 결과와 v1 입력·GT·Judge 판정/Rubric/Prompt·Metrics·CLI의 불변, K01~K15 및 K16 내용 보존을 hash/구조 비교로 확인했다. Ruff 형식·기본문법/import 검사와 OpenSpec strict 검증을 수행했다. Fake 테스트의 합성 상태는 사람 판정이나 의미 분류 품질의 측정이 아니며 실제 OpenAI 호출·Calibration 실행·v2 전체 검토 완료 처리는 수행하지 않았다.

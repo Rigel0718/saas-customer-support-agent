@@ -89,4 +89,5 @@ class AgentTrace(Base):
     model: Mapped[str | None] = mapped_column(String)
     response_id: Mapped[str | None] = mapped_column(String)
     usage: Mapped[dict | None] = mapped_column(JSONB)
+    llm_metadata: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

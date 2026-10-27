@@ -181,6 +181,7 @@ def build_manifest(
             "agent_max_tool_calls": settings.agent_max_tool_calls,
             "agent_timeout_seconds": settings.agent_timeout_seconds,
             "workflow_timeout_seconds": settings.workflow_timeout_seconds,
+            "llm_request_timeout_seconds": settings.llm_request_timeout_seconds,
             "workflow_tool_calls": 7,
             "workflow_llm_calls": 1,
             "mode_order": "odd: agent/workflow; even: workflow/agent",

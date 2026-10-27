@@ -4,11 +4,55 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    APITimeoutError,
+    AsyncOpenAI,
+    AuthenticationError,
+    BadRequestError,
+    ConflictError,
+    InternalServerError,
+    NotFoundError,
+    PermissionDeniedError,
+    RateLimitError,
+    UnprocessableEntityError,
+)
 
 from app.config import Settings
 from app.diagnosis.runtime import ExecutionBudget, ExecutionFailure, add_trace
-from app.schemas.support import DiagnosisDTO, TraceDTO
+from app.schemas.support import DiagnosisDTO, LLMErrorMetadata, LLMMetadata, TraceDTO
+
+
+def classify_llm_error(exc: Exception) -> LLMErrorMetadata:
+    # Only fixed labels and a validated status number leave this boundary.
+    # Never inspect messages, request/response objects, or exception chains.
+    labels = (
+        (APITimeoutError, "APITimeoutError"),
+        (APIConnectionError, "APIConnectionError"),
+        (BadRequestError, "BadRequestError"),
+        (AuthenticationError, "AuthenticationError"),
+        (PermissionDeniedError, "PermissionDeniedError"),
+        (NotFoundError, "NotFoundError"),
+        (ConflictError, "ConflictError"),
+        (UnprocessableEntityError, "UnprocessableEntityError"),
+        (RateLimitError, "RateLimitError"),
+        (InternalServerError, "InternalServerError"),
+        (APIStatusError, "APIStatusError"),
+        (TimeoutError, "TimeoutError"),
+        (ExecutionFailure, "ExecutionFailure"),
+    )
+    label = next(
+        (label for kind, label in labels if isinstance(exc, kind)), "UnknownError"
+    )
+    status = exc.status_code if isinstance(exc, APIStatusError) else None
+    if type(status) is not int or not 100 <= status <= 599:
+        status = None
+    return LLMErrorMetadata(
+        exception_type=label,
+        is_timeout=isinstance(exc, (APITimeoutError, TimeoutError)),
+        http_status=status,
+    )
 
 
 def responses_create(
@@ -59,7 +103,7 @@ def call_model(
     now: Callable = lambda: datetime.now(timezone.utc),
     **request_options,
 ) -> dict:
-    timeout = min(20, budget.remaining())
+    timeout = min(settings.llm_request_timeout_seconds, budget.remaining())
     before = budget.clock()
     try:
         response = (
@@ -99,6 +143,10 @@ def call_model(
             step=step,
             error_code=code,
             duration_ms=max(0, int((budget.clock() - before) * 1000)),
+            llm_metadata=LLMMetadata(
+                request_timeout_seconds=timeout,
+                error=classify_llm_error(exc) if code == "llm_error" else None,
+            ),
         )
         raise ExecutionFailure(code) from None
     data = as_dict(response)
@@ -110,6 +158,7 @@ def call_model(
         step=step,
         model=data.get("model"),
         response_id=data.get("id"),
+        llm_metadata=LLMMetadata(request_timeout_seconds=timeout),
         usage=(
             {
                 name: usage.get(name)

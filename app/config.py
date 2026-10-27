@@ -1,9 +1,41 @@
 import json
+import math
 import os
 from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy.engine import make_url
+
+
+def timeout_settings(
+    *,
+    request_timeout: str | None = None,
+    execution_timeout: str | None = None,
+) -> dict[str, float]:
+    values = {
+        "llm_request_timeout_seconds": (
+            request_timeout
+            if request_timeout is not None
+            else os.environ.get("LLM_REQUEST_TIMEOUT_SECONDS", "20")
+        ),
+        "agent_timeout_seconds": (
+            execution_timeout
+            if execution_timeout is not None
+            else os.environ.get("AGENT_TIMEOUT_SECONDS", "60")
+        ),
+        "workflow_timeout_seconds": (
+            execution_timeout
+            if execution_timeout is not None
+            else os.environ.get("WORKFLOW_TIMEOUT_SECONDS", "60")
+        ),
+    }
+    try:
+        parsed = {name: float(value) for name, value in values.items()}
+        if any(not math.isfinite(value) or value <= 0 for value in parsed.values()):
+            raise ValueError
+    except (ValueError, TypeError, OverflowError):
+        raise ValueError("Timeout settings must be positive finite numbers") from None
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -17,10 +49,9 @@ class Settings:
     agent_max_tool_calls: int = 16
     agent_timeout_seconds: float = 60
     workflow_timeout_seconds: float = 60
+    llm_request_timeout_seconds: float = 20
 
     def __post_init__(self):
-        import math
-
         if (
             self.agent_max_steps < 1
             or self.agent_max_tool_calls < 1
@@ -33,6 +64,11 @@ class Settings:
             or self.workflow_timeout_seconds <= 0
         ):
             raise ValueError("Workflow timeout must be positive and finite")
+        if (
+            not math.isfinite(self.llm_request_timeout_seconds)
+            or self.llm_request_timeout_seconds <= 0
+        ):
+            raise ValueError("LLM request timeout must be positive and finite")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -57,6 +93,5 @@ class Settings:
             os.environ.get("OPENAI_MODEL") or None,
             int(os.environ.get("AGENT_MAX_STEPS", "8")),
             int(os.environ.get("AGENT_MAX_TOOL_CALLS", "16")),
-            float(os.environ.get("AGENT_TIMEOUT_SECONDS", "60")),
-            float(os.environ.get("WORKFLOW_TIMEOUT_SECONDS", "60")),
+            **timeout_settings(),
         )

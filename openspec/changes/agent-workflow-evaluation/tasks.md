@@ -1,6 +1,6 @@
 # Tasks
 
-아래는 후속 apply에서 수행할 미완료 작업이다. 이번 propose 단계에서는 코드·DB 변경, 테스트 실행, 실제 LLM 호출을 수행하지 않는다. [Design](design.md)의 D1~D9와 [Spec](specs/diagnosis-evaluation/spec.md)을 구현 기준으로 삼는다.
+1~8절은 초기 구현의 완료 기록으로 보존한다. 이후 승인된 Calibration v2 작업은 9절에서 구분한다. [Design](design.md)의 D1~D9와 [Spec](specs/diagnosis-evaluation/spec.md)을 구현 기준으로 삼으며 실제 OpenAI 호출·Calibration 실행과 기존 평가 결과 수정은 하지 않는다.
 
 ## 1. Dataset과 GT
 
@@ -54,6 +54,14 @@
 - [x] 8.1 Fake Agent/Workflow/Judge와 격리 PostgreSQL에서 10건 및 50건의 생성→진단→조회→채점→집계→재채점을 통합 검증한다. 새 문의 개수, 교차 순서, 동일 데이터/정책·모델 조건, 원본 보존과 GT 비노출, 실패/결측 경로를 포함하여 Spec Scenario와 대조한다.
 - [x] 8.2 `uv run pytest`로 신규 및 기존 회귀 테스트를 실행하고 실제 외부 호출 없이 결과를 기록한다. 기존 API/Diagnosis/정책/Agent·Workflow 실행 구조가 변경되지 않았고 별도 migration·새 필수 의존성이 없음을 diff로 확인한다.
 - [x] 8.3 구현 내용·실행한 테스트·미해결 문제를 한국어로 보고하고, 실제 가격/모델 설정과 사람 Calibration·실제 10/50건 평가는 미수행이면 명시한다. Fake 검증 완료와 실제 품질/효율 측정을 구분하여 보고한 것을 완료 조건으로 삼는다.
+
+## 9. Calibration v2 후속 작업
+
+- [x] 9.1 대표성의 필수 확정 Label을 correct/incorrect 포함 검사로 바꾸고 ambiguous 필수 조건만 제거한다. 최소 15건·다섯 Case·나머지 필수 시나리오·핵심 오답 조건을 유지한다. K01~K15의 Diagnosis/Human Label을 보존하고 K16을 미확정 별도 초안으로 분리하며 v2 전체 검토는 미완료로 유지한다.
+- [x] 9.2 Calibration 기준 버전과 확정 Label별 사례 수·미검증 유형·한계를 결과 및 judgments/summary의 Calibration 정보에 기록한다. 과거 결과의 범위는 미기록으로 취급하고 상태를 자동 승격하거나 원본을 변경하지 않는다.
+- [x] 9.3 Fake 회귀 테스트로 기존 15건 수용, 선택적 review_required 비교, 대표성·일치율·기술 실패·Critical False-Correct 방지, review_required 출력/집계/저장과 이전 결과 호환을 검증한다. 실제 의미 분류 품질이나 실제 Calibration 측정으로 주장하지 않는다.
+- [x] 9.4 Runbook에 v2 범위·한계·데이터/초안 경계와 실행 전 Human Review 및 새 결과 경로를 안내한다. 이전 완료 기록과 v1/Pilot 결과는 보존한다.
+- [x] 9.5 관련 회귀 및 전체 테스트를 실제 API 없이 실행하고 결과·환경 제약을 기록한다. Rubric/Prompt/GT/CLI·기존 15건·K16 초안·기존 평가 결과의 보존과 OpenSpec 정합성을 최종 확인한다.
 
 ## Workflow follow-up
 

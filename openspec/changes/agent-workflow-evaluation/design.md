@@ -130,11 +130,15 @@ Judge 출력은 `semantic_verdict: correct|incorrect|review_required`, `reason`,
 
 ### D7. 사람 Calibration과 분모가 보이는 집계
 
-별도 `judge_calibration.json`에 약 15개 대표 비식별 예제를 초기 Calibration Set으로 둔다. 다섯 Case·세 semantic label과 동의 표현, 필수 사실의 생략과 모순의 구분, 단일/복합 원인 누락, 맞는 주원인+잘못된 부가 원인, C04 장애 단정과 추가 질문의 구분을 포함한다. 사람이 Judge 실행 전에 GT와 예제를 보고 label/reason/검토 버전을 확정한다. LLM이 만든 label을 사람 판정으로 기록하지 않는다. 기준 답안이 미완성인 상태도 파일로 표현하며 uncalibrated로 처리한다.
+별도 Calibration 입력에 최소 15개 대표 비식별 예제를 둔다. 다섯 Case·correct/incorrect의 확정 Human Label과 동의 표현, 필수 사실의 생략과 모순의 구분, 단일/복합 원인 누락, 맞는 주원인+잘못된 부가 원인, C04 장애 단정과 추가 질문의 구분을 포함한다. review_required Label은 선택 사항이며 존재하면 기존대로 비교한다. ambiguous 시나리오는 필수가 아니다. 기존 K12 등 유효한 사례는 유지하며 인위적인 모호성 사례나 Label을 만들지 않는다. 사람이 Judge 실행 전에 GT와 예제를 보고 label/reason/검토 버전을 확정한다. LLM이 만든 label을 사람 판정으로 기록하지 않는다. 기준 답안이 미완성인 상태도 파일로 표현하며 uncalibrated로 처리한다.
+
+후속 v2 입력 `judge_calibration_v2.json`에는 K01~K15의 Diagnosis와 Human Label·개별 검토 기록을 그대로 복사하고 전체 검토 버전은 human-review-v2로 구분한다. K16은 `judge_calibration_k16_draft.json`으로 미확정 상태 그대로 분리하며 K17은 추가하지 않는다. 전체 examples_reviewed=false와 미기입 검토자는 사람이 검토할 때까지 유지한다. v1 입력과 기존 Calibration/Pilot 결과는 수정하지 않는다.
+
+새 결과의 `criteria_version`은 `invitation-calibration-criteria-v2`로 Rubric/Prompt 버전과 구분한다. `coverage.human_label_counts`는 세 유형 각각의 확정 기준 사례 수이고 `coverage.unassessed_verdicts`는 해당 수가 0인 유형이다. 기준 사례의 존재는 일반적인 성능 보장을 의미하지 않는다. `limitation`에 작은 Set의 검토 통과라는 한계와 미검증 유형의 성능을 검증하지 않았음을 명시한다. 이 정보를 applicable_calibration을 통해 judgments/summary에도 전달한다. 기존 결과에 필드가 없으면 기준 버전·범위는 null 및 미기록 한계로 표시하고 상태를 새 기준으로 재계산하지 않는다. Judge 출력 계약·Rubric·모델 버전 비교는 유지한다.
 
 Human Label과 Judge의 의미 판정 일치율 90% 이상을 초기 MVP의 검토 목표로 둔다. 전체 확정 Human Label 수를 분모로 사용하여 Judge 실패를 성공한 표본에서 조용히 제외하지 않는다. 일치율의 분자/분모, 혼동표, 실패 건수, 항목별 사람/Judge 판정과 불일치 원문·버전을 저장한다. 필수 원인 누락·잘못된 부가 원인·C04의 근거 없는 원인 단정을 correct로 판정하는 핵심 오류(false-correct)를 확인한다.
 
-이 초기 Set에서 calibrated로 표시하는 조건은 대표 예제와 Human Label 검토 완료, Judge 기술 실패 없음, 일치율 검토 목표 충족, 지정 핵심 오답의 false-correct 0이다. 이는 해당 Set과 같은 Judge 모델·Prompt·Rubric·GT 버전에 한정된 검토 통과 상태이며 일반적인 Judge 정확성 90% 이상이나 실제 평가 품질을 보장하지 않는다. 버전이 바뀌면 이전 Calibration은 적용하지 않는다. 기준 미달/미완료에는 uncalibrated로 표시하고 원본 실행·잠정 채점은 보존하되 품질 결론을 확정하지 않는다. 자동 테스트는 사람 판정 절차를 대신하지 않는다.
+이 초기 Set에서 calibrated로 표시하는 조건은 대표 예제와 Human Label 검토 완료, Judge 기술 실패 없음, 일치율 검토 목표 충족, 지정 핵심 오답의 false-correct 0이다. 이는 해당 Set과 같은 Judge 모델·Prompt·Rubric·GT 버전에 한정된 검토 통과 상태이며 일반적인 Judge 정확성 90% 이상이나 실제 평가 품질을 보장하지 않는다. 버전이 바뀌면 이전 Calibration은 적용하지 않는다. 기준 미달/미완료에는 uncalibrated로 표시하고 원본 실행·잠정 채점은 보존하되 품질 결론을 확정하지 않는다. review_required가 없는 Set은 해당 의미 분류 성능을 검증하지 않는다. 실제 Judge의 review_required는 기존처럼 별도 집계하고 정오답 분모에서 제외하여 사람이 검토한다. quality_conclusion_ready는 Set·버전·표시된 검증 범위 내 해석이며 모든 유형의 품질 보장을 뜻하지 않는다. 자동 테스트는 사람 판정 절차를 대신하지 않는다.
 
 summary는 `case_id × mode`와 mode 전체로 나누고 진단 결과가 있는 실행의 final 상태별 개수, 시작/미시작/성공/실패/incomplete/환경 오류 수를 보존한다. Correctness 분모는 correct+incorrect, Execution Success 분모는 진단 Service 호출이 시작된 실행 수다. 문의 생성 실패는 pre-execution 환경 오류이며 측정 elapsed는 원본에 남기되 실행 성공/진단 비교 분모에 넣지 않는다. 판정 가능한 표본이 없으면 비율은 null이다.
 

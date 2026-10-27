@@ -122,3 +122,27 @@ def test_denominators_failed_pending_environment_and_censoring(pricing):
     assert group["all_started"]["input_tokens"]["observed_sum"] == 0
     assert group["successful_metrics"]["latency_ms"]["mean"] == 15
     assert summarize([], [])["by_mode"]["agent"]["correctness"]["value"] is None
+
+
+def test_review_required_remains_separate_from_correctness_denominator():
+    executions, judgments = [], []
+    for order, verdict in enumerate(("correct", "incorrect", "review_required"), 1):
+        execution = Execution(
+            execution_id=str(uuid4()),
+            case_id="C01",
+            mode="agent",
+            repeat=1,
+            order=order,
+            state="completed",
+            started=True,
+            execution_success=True,
+        )
+        executions.append(execution)
+        judgments.append(
+            {"execution_id": execution.execution_id, "final_verdict": verdict}
+        )
+    summary = summarize(executions, judgments)
+    for group in (summary["by_mode"]["agent"], summary["by_case_mode"]["C01:agent"]):
+        assert group["verdict_counts"]["review_required"] == 1
+        assert group["correctness"] == {"numerator": 1, "denominator": 2, "value": 0.5}
+        assert group["execution_success"]["value"] == 1

@@ -14,7 +14,9 @@
 - 원본 Diagnosis·실행·Trace와 재채점에 필요한 버전을 `manifest.json`, `executions.json`, `judgments.json`, `summary.json`에 보존한다. 실패·누락 데이터·분모와 성공 실행/전체 실행 통계를 명시한다.
 - 구현 단계에서 Fake/Mock 기반 자동 테스트와 한국어 `docs/evaluation_runbook.md`를 작성한다. 실제 실행과 Judge 호출은 사용자의 명시적 실행으로만 허용한다.
 
-이번 요청은 위 변경의 계획 문서 작성까지만 수행한다. 실제 코드·DB 변경, 테스트 실행, 외부 OpenAI 호출은 하지 않는다. Hybrid Router, Parallel Tool Calling, Prompt 최적화, Workflow Engine/DSL, 범용 평가 프레임워크, 외부 플랫폼, 새 비즈니스 규칙, Diagnosis 구조 변경 및 Groundedness/Task Success/Safety/Tool Selection Quality 독립 지표는 제외한다.
+초기 제안은 계획 문서 작성 범위였으며 기존 구현 완료 기록은 Tasks 1~8에 보존한다. 승인된 Calibration v2 후속 작업은 대표성 조건과 검증 범위 표시, 입력 데이터 분리, Fake 회귀 테스트 및 Runbook 보정에 한정한다. 실제 OpenAI 호출·Calibration 실행과 기존 평가 결과 수정은 하지 않는다. Hybrid Router, Parallel Tool Calling, Prompt 최적화, Workflow Engine/DSL, 범용 평가 프레임워크, 외부 플랫폼, 새 비즈니스 규칙, Diagnosis 구조 변경 및 Groundedness/Task Success/Safety/Tool Selection Quality 독립 지표는 제외한다.
+
+Calibration v2는 correct/incorrect의 확정 Human Label을 필수로 하고 review_required는 선택적으로 비교한다. ambiguous 시나리오를 강제하지 않으며 기존 대표 Case·나머지 시나리오·핵심 오답·일치율·기술 실패 조건은 유지한다. 기준 버전과 Label별 기준 사례 수·미검증 유형을 결과에 남기고, 미검증 유형을 포함한 전체 Judge 품질을 보장하지 않는다. Judge 판정 계약과 Rubric은 변경하지 않는다.
 
 ## Capabilities
 

@@ -1,5 +1,6 @@
 import json
 from copy import deepcopy
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,6 +8,8 @@ import pytest
 from app.schemas.support import DiagnosisDTO
 from evaluation.dataset import load_bundle
 from evaluation.judge import (
+    CALIBRATION_CRITERIA_VERSION,
+    CalibrationExample,
     Judge,
     JudgeConfig,
     applicable_calibration,
@@ -71,24 +74,27 @@ def reviewed_calibration():
     calibration.examples_reviewed = True
     calibration.examples_reviewer = "synthetic-test-reviewer"
     calibration.examples_review_version = "synthetic-review-v1"
-    labels = (
-        ["correct"] * 5
-        + ["incorrect"] * 4
-        + [
-            "review_required",
-            "correct",
-            "review_required",
-            "incorrect",
-            "incorrect",
-            "correct",
-        ]
-    )
-    for example, label in zip(calibration.examples, labels, strict=True):
-        example.human.label = label
+    for example in calibration.examples:
         example.human.reason = "Synthetic unit test only, not human review"
         example.human.reviewer = "synthetic-test-reviewer"
         example.human.review_version = "synthetic-review-v1"
     return calibration
+
+
+def fake_calibration(calibration, observed=None):
+    # Tests transport and gates only; never measures natural-language accuracy.
+    labels = iter(
+        observed
+        if observed is not None
+        else [example.human.label for example in calibration.examples]
+    )
+    instance = Judge(
+        JudgeConfig("fake"),
+        load_bundle(),
+        load_pricing(),
+        create=lambda **kwargs: judge_response(next(labels)),
+    )
+    return instance, run_calibration(instance, calibration)
 
 
 def test_blind_allowlist_independent_requests_and_finite_timeout():
@@ -272,6 +278,10 @@ def test_fake_semantic_contract_preserves_details_not_actual_meaning_accuracy(
 
 def test_initial_calibration_never_fabricates_human_labels():
     calibration = load_calibration()
+    # Exercise unreviewed input without relying on the local review's progress.
+    calibration.examples_reviewed = False
+    for example in calibration.examples:
+        example.human.label = None
     before = calibration.model_dump()
     instance = Judge(
         JudgeConfig("fake"),
@@ -281,11 +291,16 @@ def test_initial_calibration_never_fabricates_human_labels():
     )
     report = run_calibration(instance, calibration)
     assert len(calibration.examples) == 15
-    assert all(e.human.label is None for e in calibration.examples)
+    assert all(not e.human.confirmed() for e in calibration.examples)
     assert (
         report["status"] == "uncalibrated" and report["agreement"]["denominator"] == 0
     )
     assert calibration.model_dump() == before
+    assert report["coverage"]["human_label_counts"] == {
+        "correct": 0,
+        "incorrect": 0,
+        "review_required": 0,
+    }
 
 
 @pytest.mark.parametrize(
@@ -356,3 +371,174 @@ def test_calibration_gates_denominator_confusion_and_disagreement_text(issue):
             applicable_calibration(result, instance, [changed_judgment])["status"]
             == "uncalibrated"
         )
+
+
+def test_existing_fifteen_labels_pass_without_ambiguous_or_review_required():
+    calibration = load_calibration()
+    before = calibration.model_dump()
+    assert len(calibration.examples) == 15
+    assert "ambiguous" not in {e.scenario for e in calibration.examples}
+    instance, report = fake_calibration(calibration)
+    assert report["status"] == "calibrated" and report["reviewed"]
+    assert report["agreement"] == {"numerator": 15, "denominator": 15, "value": 1}
+    assert report["criteria_version"] == CALIBRATION_CRITERIA_VERSION
+    assert report["coverage"] == {
+        "human_label_counts": {"correct": 8, "incorrect": 7, "review_required": 0},
+        "unassessed_verdicts": ["review_required"],
+    }
+    assert "review_required" in report["limitation"]
+    assert "has not been evaluated" in report["limitation"]
+    assert "not a general accuracy guarantee" in report["limitation"]
+    assert calibration.model_dump() == before
+    applied = applicable_calibration(report, instance, [])
+    for key in ("criteria_version", "coverage", "limitation"):
+        assert applied[key] == report[key]
+
+
+@pytest.mark.parametrize(
+    "issue",
+    [
+        "too_few",
+        "case",
+        "correct_label",
+        "incorrect_label",
+        "scenario",
+        "missing_cause",
+        "additional_cause",
+        "unfounded_c04",
+        "reviewer",
+        "missing_reviewer",
+        "review_version",
+        "human_reason",
+        "human_reviewer",
+        "human_review_version",
+    ],
+)
+def test_remaining_calibration_requirements_still_reject(issue):
+    calibration = reviewed_calibration()
+    if issue == "too_few":
+        calibration.examples.pop()
+    elif issue == "case":
+        for example in calibration.examples:
+            if example.case_id == "C03":
+                example.case_id = "C01"
+    elif issue in ("correct_label", "incorrect_label"):
+        removed = issue.removesuffix("_label")
+        replacement = "incorrect" if removed == "correct" else "correct"
+        for example in calibration.examples:
+            if example.human.label == removed:
+                example.human.label = replacement
+    elif issue == "scenario":
+        for example in calibration.examples:
+            if example.scenario == "synonym":
+                example.scenario = "optional"
+    elif issue in ("missing_cause", "additional_cause", "unfounded_c04"):
+        for example in calibration.examples:
+            if example.critical_error == issue:
+                example.critical_error = None
+    elif issue == "reviewer":
+        calibration.examples_reviewer = " "
+    elif issue == "missing_reviewer":
+        calibration.examples_reviewer = None
+    elif issue == "review_version":
+        calibration.examples_review_version = " "
+    else:
+        setattr(calibration.examples[0].human, issue.removeprefix("human_"), " ")
+    _, report = fake_calibration(calibration)
+    assert report["status"] == "uncalibrated"
+    if issue == "missing_reviewer":
+        assert calibration.examples_reviewed
+        assert report["reviewed"] is False
+        assert report["agreement"]["value"] == 1
+
+
+@pytest.mark.parametrize("observed", ["review_required", "correct"])
+def test_optional_confirmed_review_required_is_compared(observed):
+    calibration = reviewed_calibration()
+    extra = calibration.examples[0].model_copy(deep=True)
+    extra.example_id = "synthetic-state-test"
+    extra.scenario = "synthetic-state-test"
+    # A synthetic state fixture, not a proposed human-labelled diagnosis.
+    extra.human.label = "review_required"
+    calibration.examples.append(extra)
+    labels = [e.human.label for e in calibration.examples]
+    labels[-1] = observed
+    _, report = fake_calibration(calibration, labels)
+    assert report["status"] == "calibrated"
+    assert report["agreement"]["denominator"] == 16
+    assert report["agreement"]["numerator"] == (
+        16 if observed == "review_required" else 15
+    )
+    assert report["confusion_matrix"]["review_required"] == {observed: 1}
+    assert report["coverage"]["human_label_counts"]["review_required"] == 1
+    assert report["coverage"]["unassessed_verdicts"] == []
+
+
+def test_judge_review_required_output_does_not_establish_human_label_coverage():
+    calibration = reviewed_calibration()
+    labels = [e.human.label for e in calibration.examples]
+    labels[0] = "review_required"
+    _, report = fake_calibration(calibration, labels)
+    assert report["agreement"]["numerator"] == 14
+    assert report["confusion_matrix"]["correct"]["review_required"] == 1
+    assert report["coverage"]["human_label_counts"]["review_required"] == 0
+    assert report["coverage"]["unassessed_verdicts"] == ["review_required"]
+
+
+@pytest.mark.parametrize("kind", ["missing_cause", "additional_cause", "unfounded_c04"])
+def test_each_critical_false_correct_rejects_despite_high_agreement(kind):
+    calibration = reviewed_calibration()
+    labels = [e.human.label for e in calibration.examples]
+    index = next(
+        i for i, e in enumerate(calibration.examples) if e.critical_error == kind
+    )
+    labels[index] = "correct"
+    _, report = fake_calibration(calibration, labels)
+    assert report["agreement"]["value"] == pytest.approx(14 / 15)
+    assert report["critical_false_correct"] == 1
+    assert report["status"] == "uncalibrated"
+
+
+@pytest.mark.parametrize("status", ["calibrated", "uncalibrated"])
+def test_legacy_result_status_and_missing_scope_are_not_recomputed(tmp_path, status):
+    instance, report = fake_calibration(reviewed_calibration())
+    report.pop("criteria_version")
+    report.pop("coverage")
+    report["status"] = status
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(report))
+    before = path.read_bytes()
+    loaded = json.loads(before)
+    snapshot = deepcopy(loaded)
+    applied = applicable_calibration(loaded, instance, [])
+    assert applied["status"] == status
+    assert applied["criteria_version"] is None and applied["coverage"] is None
+    assert "not recorded" in applied["limitation"]
+    assert loaded == snapshot and path.read_bytes() == before
+
+
+def test_v2_data_preserves_labels_and_unconfirmed_k16_separately():
+    original = load_calibration()
+    v2 = load_calibration(Path("evaluation/data/judge_calibration_v2.json"))
+    assert len(v2.examples) == len(original.examples) == 15
+    for example, previous in zip(v2.examples, original.examples, strict=True):
+        assert example.model_dump(exclude={"human"}) == previous.model_dump(
+            exclude={"human"}
+        )
+        assert example.human.label == previous.human.label
+        if example.example_id != "K12":
+            assert example.human == previous.human
+        else:
+            assert "가설" in example.human.reason
+            assert "전체 문맥에 한정" in example.human.reason
+    assert v2.calibration_version == "invite-calibration-v2"
+    assert v2.examples_review_version == "human-review-v2"
+    # Approval and reviewer identity are independent. An approved input may
+    # still lack an identified reviewer and must not be treated as calibrated.
+    draft = CalibrationExample.model_validate_json(
+        Path("evaluation/data/judge_calibration_k16_draft.json").read_bytes()
+    )
+    DiagnosisDTO.model_validate(draft.diagnosis)
+    assert draft.example_id == "K16" and not draft.human.confirmed()
+    assert draft.human.label is draft.human.reason is draft.human.reviewer is None
+    assert draft.human.review_version == "human-review-v2"

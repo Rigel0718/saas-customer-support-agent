@@ -7,6 +7,7 @@ import pytest
 from app.agent import loop
 from app.agent.tools import TOOL_DEFINITIONS
 from app.config import Settings
+from app.diagnosis.prompts import OUTPUT_CONTRACT
 from app.schemas.support import DiagnosisDTO
 from app.seed import uid
 from app.services import customer
@@ -15,16 +16,21 @@ from tests.test_agent_loop import ScriptedResponses, evidence, final, function, 
 from tests.test_support_models import NOW
 
 
-# Captured before the runtime refactor; do not derive these from the current constants.
+# Frozen prompt snapshots; update deliberately when the output contract changes.
 EXPECTED_INSTRUCTIONS = json.loads(
     (Path(__file__).parent / "fixtures" / "diagnosis_instructions.json").read_text()
 )
 
 
 @pytest.mark.parametrize("mode", ["agent", "workflow"])
-def test_final_instructions_match_pre_refactor_text(mode):
+def test_final_instructions_match_snapshot(mode):
     module = loop if mode == "agent" else runner
     assert module.INSTRUCTIONS == EXPECTED_INSTRUCTIONS[mode]
+
+
+def test_modes_share_output_contract():
+    for instructions in (loop.INSTRUCTIONS, runner.INSTRUCTIONS):
+        assert instructions.count(OUTPUT_CONTRACT) == 1
 
 
 @pytest.mark.parametrize("mode", ["agent", "workflow"])

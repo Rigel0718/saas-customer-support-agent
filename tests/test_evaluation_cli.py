@@ -8,6 +8,7 @@ import pytest
 from psycopg import OperationalError as DriverOperationalError
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
+from app.schemas.support import RequestDTO
 from evaluation.dataset import EvaluationError, load_bundle, sha256
 from evaluation.judge import Judge, JudgeConfig, grade_store
 from evaluation.metrics import load_pricing
@@ -15,7 +16,13 @@ from evaluation.results import ResultStore, prepare_regrade
 from evaluation.runner import run_collection
 from scripts import evaluate
 from tests.test_evaluation_fixtures import evaluation_database  # noqa: F401
-from tests.test_evaluation_judge import judge_response
+from tests.test_evaluation_judge import (
+    diagnosis,
+    fake_calibration,
+    judge_response,
+    reviewed_calibration,
+)
+from tests.test_evaluation_results import make_store
 from tests.test_evaluation_runner import DiagnosisFake, prepared_store
 from tests.test_support_models import NOW
 
@@ -80,7 +87,11 @@ def test_database_failures_hide_credentials_in_cli_logs_and_artifacts(
     monkeypatch, capsys, caplog, tmp_path, failure, expected_code
 ):
     # Synthetic markers only; no .env loading, real DB connection, or SDK calls.
-    username, password, api_key = "synthetic-user", "synthetic-password", "synthetic-key"
+    username, password, api_key = (
+        "synthetic-user",
+        "synthetic-password",
+        "synthetic-key",
+    )
     port = "invalid-port" if failure == "invalid_url" else "5432"
     url = f"postgresql+psycopg://{username}:{password}@db.invalid:{port}/evaluation"
     detail = f"connection failed: {url}; password={password}; api_key={api_key}"
@@ -115,8 +126,7 @@ def test_database_failures_hide_credentials_in_cli_logs_and_artifacts(
 
     path = tmp_path / "run"
     assert (
-        evaluate.main(["run", "--output-dir", str(path), "--allow-live-diagnosis"])
-        == 1
+        evaluate.main(["run", "--output-dir", str(path), "--allow-live-diagnosis"]) == 1
     )
     captured = capsys.readouterr()
     assert captured.out == f"평가 중단: {expected_code}\n"
@@ -249,6 +259,12 @@ def test_regrade_duplicate_rejected_and_judge_failures_preserved(
 def test_calibration_cli_does_not_fabricate_labels_and_rejects_overwrite(
     tmp_path, monkeypatch
 ):
+    # This scenario needs unreviewed input regardless of local human reviews.
+    calibration = evaluate.load_calibration()
+    calibration.examples_reviewed = False
+    for example in calibration.examples:
+        example.human.label = None
+    monkeypatch.setattr(evaluate, "load_calibration", lambda *args: calibration)
     calls = []
     judge = Judge(
         JudgeConfig("fake"),
@@ -268,6 +284,90 @@ def test_calibration_cli_does_not_fabricate_labels_and_rejects_overwrite(
     assert len(calls) == 15
 
 
+def test_regrade_preserves_scope_and_review_required_for_human_review(
+    tmp_path, monkeypatch
+):
+    # Synthetic collected artifacts; no diagnosis execution or database required.
+    store = make_store(tmp_path / "source")
+    execution = store.executions[0]
+    request_id = uuid4()
+    execution.request_id = str(request_id)
+    execution.request = RequestDTO(
+        id=request_id,
+        requester_user_id=uuid4(),
+        organization_id=uuid4(),
+        content="합성 문의",
+        status="completed",
+        execution_mode=execution.mode,
+        created_at=NOW,
+        started_at=NOW,
+        finished_at=NOW,
+        diagnosis=diagnosis(),
+        error_code=None,
+    )
+    execution.state = "completed"
+    execution.started = execution.execution_success = execution.trace_complete = True
+    store.manifest.status = "collected"
+    store.manifest.completed_count = 1
+    store.initialize()
+    originals = {p.name: p.read_bytes() for p in store.directory.glob("*.json")}
+    _, calibration = fake_calibration(reviewed_calibration())
+    calibration_path = tmp_path / "synthetic-calibration.json"
+    calibration_path.write_text(json.dumps(calibration))
+    calls = []
+    judge = Judge(
+        JudgeConfig("fake"),
+        load_bundle(),
+        load_pricing(),
+        create=lambda **kwargs: (
+            calls.append(kwargs) or judge_response("review_required")
+        ),
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Regrade must not execute diagnosis or contact DB")
+
+    monkeypatch.setattr(evaluate, "judge_client", lambda *args: judge)
+    monkeypatch.setattr(evaluate, "build_engine", forbidden)
+    monkeypatch.setattr(evaluate, "run_command", forbidden)
+    assert (
+        evaluate.main(
+            [
+                "judge",
+                "--run-dir",
+                str(store.directory),
+                "--regrade",
+                "--calibration-result",
+                str(calibration_path),
+                "--allow-live-judge",
+            ]
+        )
+        == 0
+    )
+    target = ResultStore.load(next((store.directory / "regrades").iterdir()))
+    assert len(calls) == 1
+    judgment = target.judgments["items"][0]
+    assert (
+        judgment["semantic_verdict"] == judgment["final_verdict"] == "review_required"
+    )
+    assert judgment["judge_status"] == "judged" and judgment["outcome_match"]
+    for artifact in (target.judgments, target.summary):
+        applied = artifact["calibration"]
+        assert applied["status"] == "calibrated"
+        for key in ("criteria_version", "coverage", "limitation"):
+            assert applied[key] == calibration[key]
+    group = target.summary["by_mode"][execution.mode]
+    assert group["verdict_counts"]["review_required"] == 1
+    assert group["correctness"]["denominator"] == 0
+    assert target.summary["quality_conclusion_ready"]
+    assert target.summary["calibration"]["coverage"]["unassessed_verdicts"] == [
+        "review_required"
+    ]
+    assert all(
+        (store.directory / name).read_bytes() == raw for name, raw in originals.items()
+    )
+
+
 def test_runbook_cli_examples_parse_and_help(capsys):
     text = Path("docs/evaluation_runbook.md").read_text()
     examples = 0
@@ -283,7 +383,7 @@ def test_runbook_cli_examples_parse_and_help(capsys):
                 assert caught.value.code == 0
             else:
                 evaluate.parser().parse_args(args)
-    assert examples == 9
+    assert examples == 11
 
 
 def test_invalid_gt_rejected_before_fixture_writes_or_models(tmp_path, monkeypatch):
@@ -310,7 +410,7 @@ def test_preparation_error_preserves_invalid_manifest_and_summary(
     monkeypatch.setattr(
         evaluate,
         "diagnosis_settings",
-        lambda: Settings("unused", {}, openai_model="fake"),
+        lambda **kwargs: Settings("unused", {}, openai_model="fake"),
     )
     monkeypatch.setenv("EVALUATION_DATABASE_URL", "postgresql://host/evaluation")
     monkeypatch.setenv("DATABASE_URL", "postgresql://host/development")

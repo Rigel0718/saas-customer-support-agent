@@ -90,15 +90,30 @@ Judge는 GT와 Diagnosis의 summary·causes만으로 독립 채점하고 모드�
 - **THEN** 실행 성공·Latency·Usage는 유지하고 채점만 pending으로 남기며 해당 건을 incorrect 수에 포함하지 않는다
 
 ### Requirement: 사람 기준 Calibration
-Judge 신뢰성은 사람이 사전에 판정한 별도 Calibration Set으로 검토해야 한다(MUST). 약 15개 대표 예제를 초기 Set으로 사용하고 5개 Case와 correct/incorrect/review_required, 동의 표현·필수 사실의 생략과 모순·원인 누락·추가 오답·C04 단정·C05 복합 원인을 포함해야 한다(MUST). Human Label과 Judge의 일치율 90% 이상은 초기 MVP의 검토 목표이며 일반적인 Judge 정확성 보장으로 표현해서는 안 된다(MUST). 전체 확정 Human Label 수를 분모로 하여 Judge 실패를 제외하지 않고 일치율의 분자/분모·혼동표·실패 건수·항목별 판정·불일치 원문과 버전을 보존해야 한다(MUST).
+사람이 사전 판정한 최소 15개 Calibration 예제는 C01~C05와 확정 correct/incorrect Label, 동의 표현·사실 생략/모순·원인 누락·추가 오답·C04 단정/추가 정보 요청·C05 복합 원인을 포함해야 한다(MUST). review_required Label은 선택적으로 비교하고 ambiguous 시나리오는 강제하지 않으며 기존 유효 사례는 보존해야 한다(MUST). 일치율 ≥90%는 초기 검토 목표일 뿐 일반적 정확성 보장이 아니어야 한다(MUST). 전체 확정 Label을 분모로 Judge 실패도 포함하여 일치율·혼동표·실패 수·항목별 판정/불일치 원문·버전을 보존해야 한다(MUST).
 
 #### Scenario: 초기 Set의 검토 통과 표시
 - **WHEN** 대표 예제와 Human Label 검토가 완료되고 Judge 기술 실패 없이 일치율 검토 목표를 충족하며 지정된 필수 원인 누락·잘못된 부가 원인·C04의 근거 없는 원인 단정 예제의 false-correct가 0이다
 - **THEN** 해당 Set과 같은 Judge 모델·Prompt·Rubric·GT 버전에 한해 calibrated로 표시하고 일반적인 Judge 정확성이나 실제 평가 품질의 보장으로 해석하지 않는다
 
+#### Scenario: 두 확정 Label과 미검증 유형
+- **WHEN** K01~K15에 correct/incorrect만 있고 ambiguous 시나리오가 없지만 나머지 대표성·사람 검토·일치율·기술 실패·핵심 오답 조건을 충족한다
+- **THEN** 두 항목의 부재만으로 탈락시키지 않으며 review_required 기준 사례 수 0과 해당 유형의 성능 미검증을 명시한다
+
+#### Scenario: 선택적 review_required와 이전 결과
+- **WHEN** 확정 review_required Human Label이 추가되거나 기준 버전·검증 범위가 없는 과거 결과를 적용한다
+- **THEN** 전자는 일치율 분모와 혼동표에 포함하고 후자는 새 검증 범위를 추정하지 않으며 원본 상태와 파일을 보존한다
+
 #### Scenario: Calibration 미완료 또는 미달
 - **WHEN** 사람 label이 미확정이거나 Judge 기술 실패 또는 기준 미달이 발생한다
 - **THEN** uncalibrated로 표시하고 실제 채점을 잠정 결과로 보존하되 품질 결론을 확정하지 않으며, 사람이 확정한 review_required label은 유효한 기준 답안으로 구분한다
+
+### Requirement: Calibration 검증 범위의 명시
+Calibration 기준 버전, 확정 Human Label별 기준 사례 수, 기준 사례가 없는 미검증 판정 유형과 한계를 Calibration 결과 및 새 채점 결과의 Calibration 정보에 기록해야 한다(MUST). Judge 출력 빈도로 Human Label의 대표성을 대신해서는 안 된다(MUST). 과거 결과의 상태를 새 기준으로 재계산하거나 자동 승격해서는 안 되며, 기준 버전·범위가 없으면 미기록으로 취급해야 한다(MUST). Rubric과 Judge의 세 판정값, 실제 review_required의 Human Review 대상 분리는 유지해야 한다(MUST).
+
+#### Scenario: 검증 범위 전달과 이전 결과 보존
+- **WHEN** review_required 기준 사례가 없는 Calibration을 새 채점에 적용하거나 검증 범위가 없는 이전 결과를 읽는다
+- **THEN** 전자는 해당 유형의 성능 미검증을 judgments/summary에 전달하고 후자는 범위를 추정하거나 원본 상태·파일을 변경하지 않는다
 
 ### Requirement: Latency와 호출 수의 측정 경계
 End-to-end Latency는 Runner에서 문의 생성 시작부터 동기 진단 반환/예외까지 monotonic 시계로 측정해야 한다(MUST). Fixture·GT 검증, 사후 조회, Judge, 파일 저장은 제외해야 한다(MUST). 완전한 Trace에서 llm_response와 tool_result의 개수를 실패 시도 포함 호출 수로 계산해야 한다(MUST). 단계별 duration_ms 합이나 DB 시각 차이로 End-to-end를 대체해서는 안 된다(MUST).

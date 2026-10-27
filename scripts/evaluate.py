@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from app.config import Settings
+from app.config import Settings, timeout_settings
 from app.db import build_engine
 from evaluation.dataset import DATA_DIR, EvaluationError, load_bundle
 from evaluation.fixtures import (
@@ -47,6 +47,14 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--repetitions", type=int, choices=(1, 5), default=1)
         if name == "run":
             command.add_argument(
+                "--llm-request-timeout-seconds",
+                help="두 모드 공통 LLM 요청 Timeout(초), 환경변수보다 우선",
+            )
+            command.add_argument(
+                "--execution-timeout-seconds",
+                help="두 모드 공통 실행 Budget(초), 모드별 환경변수보다 우선",
+            )
+            command.add_argument(
                 "--allow-live-diagnosis",
                 action="store_true",
                 help="실제 진단 호출 및 비용 발생을 허용",
@@ -84,16 +92,31 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
-def diagnosis_settings() -> Settings:
+def diagnosis_settings(
+    *,
+    request_timeout: str | None = None,
+    execution_timeout: str | None = None,
+) -> Settings:
+    try:
+        timeouts = timeout_settings(
+            request_timeout=request_timeout, execution_timeout=execution_timeout
+        )
+    except ValueError:
+        raise EvaluationError("invalid_timeout_configuration") from None
+    if timeouts["agent_timeout_seconds"] != timeouts["workflow_timeout_seconds"]:
+        raise EvaluationError(
+            "unequal_execution_budgets_use_--execution-timeout-seconds"
+        )
     model, key = os.environ.get("OPENAI_MODEL"), os.environ.get("OPENAI_API_KEY")
     if not model or not key:
         raise EvaluationError("missing_diagnosis_configuration")
-    # Same standard limits and budget for both modes; no bearer config dependency.
+    # Standard step/tool limits and equal timeouts; no bearer config dependency.
     return Settings(
         os.environ.get("EVALUATION_DATABASE_URL", ""),
         {},
         openai_api_key=key,
         openai_model=model,
+        **timeouts,
     )
 
 
@@ -108,7 +131,10 @@ def judge_client(bundle, pricing) -> Judge:
 
 
 def run_command(args, bundle, pricing) -> Path:
-    settings = diagnosis_settings()
+    settings = diagnosis_settings(
+        request_timeout=args.llm_request_timeout_seconds,
+        execution_timeout=args.execution_timeout_seconds,
+    )
     evaluation_url = os.environ.get("EVALUATION_DATABASE_URL", "")
     database = validate_database_urls(
         evaluation_url,

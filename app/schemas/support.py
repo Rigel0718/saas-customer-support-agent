@@ -49,9 +49,12 @@ class Evidence(Schema):
 
 
 class DiagnosisDTO(Schema):
+    # 정보가 부족해도 일부 확인된 원인은 유지할 수 있다.
     outcome: Literal["diagnosed", "needs_information", "escalate"]
     summary: Nonempty
+    # 관찰 증거로 뒷받침되는 원인만 포함하며, 없으면 빈 배열이다.
     causes: list[Nonempty]
+    # 추가 정보가 필요하면 검증할 사항이나 필요한 정보를 명시한다.
     next_actions: list[Nonempty]
     evidence: list[Evidence]
 
@@ -84,6 +87,32 @@ class RequestDTO(Schema):
         return self
 
 
+class LLMErrorMetadata(Schema):
+    exception_type: Literal[
+        "APITimeoutError",
+        "APIConnectionError",
+        "APIStatusError",
+        "BadRequestError",
+        "AuthenticationError",
+        "PermissionDeniedError",
+        "NotFoundError",
+        "ConflictError",
+        "UnprocessableEntityError",
+        "RateLimitError",
+        "InternalServerError",
+        "TimeoutError",
+        "ExecutionFailure",
+        "UnknownError",
+    ]
+    is_timeout: Annotated[bool, Field(strict=True)]
+    http_status: Annotated[int, Field(strict=True, ge=100, le=599)] | None
+
+
+class LLMMetadata(Schema):
+    request_timeout_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)]
+    error: LLMErrorMetadata | None = None
+
+
 class TraceDTO(Schema):
     sequence: int
     event_type: EventType
@@ -97,6 +126,7 @@ class TraceDTO(Schema):
     model: str | None = None
     response_id: str | None = None
     usage: dict | None = None
+    llm_metadata: LLMMetadata | None = None
     created_at: datetime
 
 
