@@ -2,12 +2,13 @@ import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from app.schemas.support import TraceDTO
+from app.schemas.support import FailureMetadata, TraceDTO
 
 
 class ExecutionFailure(Exception):
-    def __init__(self, code: str):
+    def __init__(self, code: str, *, failure_metadata: FailureMetadata | None = None):
         self.code = code
+        self.failure_metadata = failure_metadata
         super().__init__(code)
 
 

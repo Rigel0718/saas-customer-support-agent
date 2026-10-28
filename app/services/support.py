@@ -14,10 +14,12 @@ from app.models.support import AgentTrace, Diagnosis, SupportRequest
 from app.schemas.support import (
     DiagnosisDTO,
     ExecutionMode,
+    FailureMetadata,
     RequestCreate,
     RequestDTO,
     TraceDTO,
     TracesDTO,
+    diagnosis_field_path,
 )
 from app.services.customer import CallerContext, CustomerError, require_context
 from app.workflow.runner import run_workflow
@@ -94,33 +96,99 @@ def get_traces(session: Session, context: CallerContext, request_id: UUID) -> Tr
 
 
 def validate_diagnosis(raw: str, traces: list[TraceDTO]) -> DiagnosisDTO:
+    if not raw.strip():
+        raise ExecutionFailure(
+            "invalid_output",
+            failure_metadata=FailureMetadata(
+                failure_stage="text_extraction", failure_reason="empty_output"
+            ),
+        )
     try:
         diagnosis = DiagnosisDTO.model_validate_json(raw)
+    except ValidationError as exc:
+        first = exc.errors(
+            include_input=False, include_context=False, include_url=False
+        )[0]
+        invalid_json = first["type"] == "json_invalid"
+        raise ExecutionFailure(
+            "invalid_output",
+            failure_metadata=FailureMetadata(
+                failure_stage="diagnosis_json" if invalid_json else "diagnosis_schema",
+                failure_reason="invalid_json" if invalid_json else "validation_error",
+                field_path=None if invalid_json else diagnosis_field_path(first["loc"]),
+            ),
+        ) from None
+    except (ValueError, TypeError):
+        raise ExecutionFailure(
+            "invalid_output",
+            failure_metadata=FailureMetadata(
+                failure_stage="diagnosis_schema", failure_reason="validation_error"
+            ),
+        ) from None
+
+    field_path = None
+    try:
         observations = {
             trace.sequence: trace
             for trace in traces
             if trace.event_type == "tool_result" and trace.observation is not None
         }
         successful = False
-        for evidence in diagnosis.evidence:
+        for index, evidence in enumerate(diagnosis.evidence):
+            field_path = f"evidence[{index}].trace_sequence"
             trace = observations.get(evidence.trace_sequence)
             if trace is None:
-                raise ValueError("Invalid observation reference")
+                raise ExecutionFailure(
+                    "invalid_output",
+                    failure_metadata=FailureMetadata(
+                        failure_stage="evidence_reference",
+                        failure_reason="invalid_trace_reference",
+                        field_path=field_path,
+                    ),
+                )
+            field_path = f"evidence[{index}]"
             if trace.observation["ok"]:
                 successful = True
             if evidence.policy_document_id is not None:
+                field_path = f"evidence[{index}].policy_document_id"
                 if trace.tool_name != "search_policy" or not trace.observation["ok"]:
-                    raise ValueError("Invalid policy reference")
+                    raise ExecutionFailure(
+                        "invalid_output",
+                        failure_metadata=FailureMetadata(
+                            failure_stage="policy_reference",
+                            failure_reason="invalid_policy_reference",
+                            field_path=field_path,
+                        ),
+                    )
                 ids = {
                     item["document_id"] for item in trace.observation["data"]["items"]
                 }
                 if evidence.policy_document_id not in ids:
-                    raise ValueError("Policy was not observed")
+                    raise ExecutionFailure(
+                        "invalid_output",
+                        failure_metadata=FailureMetadata(
+                            failure_stage="policy_reference",
+                            failure_reason="unobserved_policy_document",
+                            field_path=field_path,
+                        ),
+                    )
         if diagnosis.outcome == "diagnosed" and not successful:
-            raise ValueError("Successful observation required")
+            raise ExecutionFailure(
+                "invalid_output",
+                failure_metadata=FailureMetadata(
+                    failure_stage="evidence_reference",
+                    failure_reason="no_successful_observation", field_path="evidence",
+                ),
+            )
         return diagnosis
-    except (ValidationError, ValueError, TypeError, KeyError):
-        raise ExecutionFailure("invalid_output") from None
+    except (ValueError, TypeError, KeyError):
+        raise ExecutionFailure(
+            "invalid_output",
+            failure_metadata=FailureMetadata(
+                failure_stage="observation_validation",
+                failure_reason="invalid_observation", field_path=field_path,
+            ),
+        ) from None
 
 
 def save_terminal(
@@ -238,8 +306,11 @@ def diagnose_request(
             )
             try:
                 diagnosis = validate_diagnosis(raw, traces)
-            except ExecutionFailure:
-                add_trace(traces, "final_result", now, error_code="invalid_output")
+            except ExecutionFailure as exc:
+                add_trace(
+                    traces, "final_result", now, error_code="invalid_output",
+                    failure_metadata=exc.failure_metadata,
+                )
                 raise
             add_trace(traces, "final_result", now)
             add_trace(traces, "execution_completed", now)
@@ -248,7 +319,10 @@ def diagnose_request(
             if error_code == "invalid_output" and not any(
                 trace.event_type == "final_result" for trace in traces
             ):
-                add_trace(traces, "final_result", now, error_code=error_code)
+                add_trace(
+                    traces, "final_result", now, error_code=error_code,
+                    failure_metadata=exc.failure_metadata,
+                )
             add_trace(traces, "execution_failed", now, error_code=error_code)
         except SQLAlchemyError:
             raise

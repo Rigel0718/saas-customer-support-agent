@@ -11,7 +11,7 @@ from app.diagnosis.llm import call_model, extract_output_text
 from app.diagnosis.prompts import OUTPUT_CONTRACT
 from app.diagnosis.runtime import ExecutionBudget, ExecutionFailure, add_trace
 from app.diagnosis.tools import execute_observed_tool
-from app.schemas.support import TraceDTO
+from app.schemas.support import FailureMetadata, TraceDTO
 from app.services import policy
 from app.services.customer import CallerContext
 
@@ -78,11 +78,20 @@ def run_agent(
         if not calls:
             return extract_output_text(data)
         ids = [call.get("call_id") for call in calls]
-        if any(
-            not isinstance(cid, str) or not cid.strip() or cid in seen_ids
-            for cid in ids
-        ) or len(set(ids)) != len(ids):
-            raise ExecutionFailure("invalid_output")
+        if any(not isinstance(cid, str) or not cid.strip() for cid in ids):
+            raise ExecutionFailure(
+                "invalid_output",
+                failure_metadata=FailureMetadata(
+                    failure_stage="agent_tool_call", failure_reason="invalid_call_id"
+                ),
+            )
+        if any(cid in seen_ids for cid in ids) or len(set(ids)) != len(ids):
+            raise ExecutionFailure(
+                "invalid_output",
+                failure_metadata=FailureMetadata(
+                    failure_stage="agent_tool_call", failure_reason="duplicate_call_id"
+                ),
+            )
         seen_ids.update(ids)
         inputs.extend(output)
         for call in calls:

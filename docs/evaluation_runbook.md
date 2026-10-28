@@ -76,6 +76,65 @@ run 생성 시 `manifest.json`, `executions.json`, `judgments.json`, `summary.js
 
 Latency는 preflight·인증 후 문의 생성 직전부터 동기 diagnose 반환/예외까지 monotonic으로 측정한다. 생성·시작·종료 저장은 포함하고 사후 조회·Judge·파일 저장은 제외한다. HTTP 응답시간이나 Trace duration 합이 아니다. 기존 60초 Budget은 Service 전체의 엄격한 지연 상한이 아니다. `completed`는 needs_information/escalate와 의미 오답도 실행 성공이다. 처리된 `failed`는 다음 새 문의로 진행한다. 시작 후 running/종료 미확인은 `incomplete`, execution_success=false, censored=true다. 생성 실패는 `environment_error`, started=false, execution_success=null이며 실행 분모에서 제외한다. 결과 수집 오류는 원래 반환된 종료 판정을 덮어쓰지 않는다. DB 오류는 새 Session으로 저장 결과만 복구 조회하며 진단 재호출·자동 재개는 하지 않는다. 지속 장애나 Fixture 오류는 후속 실행을 중단하고 run 전체 비교를 무효화한다. 유실 Trace/저장되지 않은 invalid_output 원문은 복원할 수 없다.
 
+## 출력 실패 관측 정보
+
+문의 응답의 `error_code="invalid_output"`, failed 상태와 diagnosis=null 계약은 유지한다. 상세 분류는 기존 Trace API의 `final_result(error_code="invalid_output")` 한 건에만 nullable `failure_metadata`로 기록한다. `execution_failed`에 복제하거나 새 이벤트를 만들지 않는다. 성공 실행의 모든 Trace와 다른 이벤트의 새 필드는 null이다. 내부 Trace는 기존 애플리케이션 실행 기록을 뜻하며 같은 조직의 기존 조회 권한을 사용한다.
+
+```json
+{
+  "failure_stage": "evidence_reference",
+  "failure_reason": "invalid_trace_reference",
+  "field_path": "evidence[0].trace_sequence"
+}
+```
+
+분류는 Application이 출력을 거부한 단계와 고정 사유이며 예외 메시지·응답 원문·잘못된 필드 값·모델 내부 추론을 담지 않는다. `field_path`는 알려진 Schema 필드와 음이 아닌 배열 인덱스로만 구성하며 임의 추가 JSON key나 root validator 위치는 null이다. 새 정보는 모델/Judge 입력이나 Diagnosis 근거로 사용하지 않는다.
+
+LLM Trace는 응답 status 검사보다 먼저 기록된다. `llm_response.error_code=null`이나 Output Tokens의 크기만으로 정상 최종 출력·잘림 여부를 판단하지 않는다. Budget 소진·refusal이 status 검사보다 우선하며 기존 execution_timeout/model_refusal을 유지한다. 각 실패는 즉시 종료하고 추가 호출·Retry·Recovery를 하지 않는다.
+
+| failure_stage | failure_reason | 거부 조건 |
+|---|---|---|
+| response_status | not_completed | status가 completed가 아니거나 누락 |
+| agent_tool_call | invalid_call_id | call ID 누락/null/비문자열/공백 |
+| agent_tool_call | duplicate_call_id | 같은 응답 또는 이전 턴의 ID 재사용 |
+| workflow_output | unexpected_function_call | Workflow의 예상하지 않은 Tool 요청 |
+| text_extraction | empty_output | 추출한 최종 문자열이 비었거나 공백뿐 |
+| diagnosis_json | invalid_json | 비어 있지 않은 문자열의 JSON 구문 오류 |
+| diagnosis_schema | validation_error | 필수 필드·타입·extra·공백 문장·outcome별 필수 내용 오류 |
+| evidence_reference | invalid_trace_reference | 관찰이 있는 tool_result가 아닌 Trace 참조 |
+| evidence_reference | no_successful_observation | diagnosed의 Evidence 중 성공 관찰 없음 |
+| policy_reference | invalid_policy_reference | 정책 ID의 대상이 성공한 search_policy가 아님 |
+| policy_reference | unobserved_policy_document | 해당 검색 결과에 정책 ID가 없음 |
+| observation_validation | invalid_observation | 관찰의 필수 키/구조 접근 실패 |
+
+call ID의 형식 오류와 중복이 함께 있으면 형식 오류를 먼저 기록한다. Workflow는 function_call을 빈 텍스트보다 먼저 거부한다. malformed 응답 타입 등의 기존 일반 예외를 새 invalid_output 분기로 바꾸지 않는다.
+
+Schema 검증의 첫 오류 위치만 `summary`, `causes[0]`, `evidence[0].trace_sequence` 등의 고정 형식으로 기록한다. 임의 key·검증 input/ctx/msg는 기록하지 않는다. 근거 검증에서 `step`과 `trace_sequence`는 다르며 정책 ID는 참조한 바로 그 검색에서 관찰되어야 한다. 이 정보는 거부 경계를 식별하지만 최종 응답 원문 재현이나 공급자 내부 원인의 증명이 아니다. 저장되지 않은 과거 세 실패의 사유는 복원할 수 없다.
+
+기존 DB는 001/002 migration 적용 후 새 코드 실행 전에 `migrations/003_diagnosis_failure_metadata.sql`을 운영자가 수동 적용한다. `agent_traces.failure_metadata` nullable JSONB 열 하나만 추가하며 기존 행은 null이고 backfill/update·자동 적용은 없다. 빈 테스트 DB는 새 ORM으로 같은 구조를 만든다. 개발/기존 평가 schema에 테스트 migration을 실행하지 않는다. rollback은 추가 열과 새 평가 결과를 보존하고 이전 Application으로 돌아가는 방식이며, 열 삭제나 과거 결과 재작성은 하지 않는다.
+
+문의 응답과 llm_metadata의 의미는 유지한다. Trace API에는 nullable 필드가 추가되므로 미지 필드를 거부하는 이전 strict Consumer는 갱신해야 한다. 새 Reader는 필드 없는 이전 Trace를 null로 읽지만 이전 Reader가 새 결과도 읽을 수 있다고 보장하지 않는다. 과거 기록을 추정 보충하지 않는다.
+
+Evaluation의 `executions.json.items[].traces[].failure_metadata`에 같은 정보를 보존하며 형식 버전은 additive 확장으로 evaluation-v1을 유지한다. `summary.by_mode`와 `summary.by_case_mode`의 각 그룹에는 다음 `invalid_output` 블록이 추가된다. 아래 값은 합성 예시다.
+
+```json
+{
+  "count": 2,
+  "rate": {"numerator": 2, "denominator": 5, "value": 0.4},
+  "classified_count": 1,
+  "unclassified_count": 1,
+  "by_reason": [
+    {"failure_stage": "diagnosis_schema", "failure_reason": "validation_error", "count": 1}
+  ]
+}
+```
+
+분자는 started인 failed 실행 중 저장된 문의가 failed/invalid_output인 Execution 수다. 분모는 그룹의 모든 started 실행이며 incomplete도 포함하고 미시작/환경 준비 실패는 제외한다. 분모 0이면 rate.value=null이다. 최종 문의 오류가 database_error이거나 종료 미확인인 실행은 중간 Trace만으로 invalid_output 분자에 편입하지 않는다.
+
+유일한 `final_result(error_code=invalid_output)`의 metadata를 Execution당 한 번 집계하고 `execution_failed`는 중복 표본으로 세지 않는다. final_result가 없거나 여러 건, metadata 미기록이면 unclassified_count다. 부분 Trace도 유일한 final_result의 분류가 있으면 확인된 값으로 사용할 수 있다. classified+unclassified=count이고 by_reason의 합은 classified다. by_reason은 stage/reason으로 정렬하며 0건 항목은 생략한다. 출력 실패가 없으면 count와 두 분류 수는 0, by_reason=[]다.
+
+기존 실행 성공·Correctness·효율 지표의 정의는 유지한다. metadata 없는 과거 실패는 미분류이며 실제 50회 결과를 다시 쓰거나 사유를 추정하지 않는다. 새 Reader로 과거 결과를 읽거나 별도 재채점 준비를 해도 원본 byte/hash는 보존한다. 최초 채점 전 summary는 기존 ungraded placeholder일 수 있으며 분류 요약을 얻으려고 추가 Judge 호출을 만들지 않는다.
+
 ## 일곱 Metrics와 누락 해석
 
 Diagnosis Correctness는 correct/(correct+incorrect), Execution Success는 completed 성공 수/진단 Service 호출을 시작한 수다. review_required/pending은 정오답 분모에 넣지 않는다. needs_information/escalate도 유효한 completed면 실행 성공이다. E2E Latency, Input/Output/Total Tokens, LLM Calls, Tool Calls, Estimated Cost를 Case×Mode와 Mode 전체에서 집계한다. Token의 세 필드는 하나의 사용량 지표이며 공급자 total을 input+output으로 보충하지 않는다.

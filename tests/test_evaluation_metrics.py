@@ -1,4 +1,5 @@
 from copy import deepcopy
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,8 @@ from evaluation.metrics import (
     validate_pricing,
 )
 from evaluation.results import Execution
+from app.schemas.support import FailureMetadata, TraceDTO
+from tests.test_support_models import NOW
 
 
 @pytest.fixture
@@ -146,3 +149,99 @@ def test_review_required_remains_separate_from_correctness_denominator():
         assert group["verdict_counts"]["review_required"] == 1
         assert group["correctness"] == {"numerator": 1, "denominator": 2, "value": 0.5}
         assert group["execution_success"]["value"] == 1
+
+
+def output_failure(mode="agent", *, trace_count=1, metadata=True):
+    detail = FailureMetadata(
+        failure_stage="diagnosis_schema", failure_reason="validation_error"
+    ) if metadata else None
+    traces = [
+        TraceDTO(
+            sequence=i + 1, event_type="final_result", created_at=NOW,
+            error_code="invalid_output", failure_metadata=detail,
+        )
+        for i in range(trace_count)
+    ]
+    # Multiple terminal events must never count as additional executions.
+    traces.extend(
+        TraceDTO(
+            sequence=len(traces) + i + 1, event_type="execution_failed",
+            created_at=NOW, error_code="invalid_output", failure_metadata=detail,
+        ) for i in range(2)
+    )
+    return SimpleNamespace(
+        execution_id=str(uuid4()), case_id="C03", mode=mode,
+        state="failed", started=True, execution_success=False,
+        request=SimpleNamespace(status="failed", error_code="invalid_output", diagnosis=None),
+        traces=traces, trace_complete=False, censored=False, metrics={},
+    )
+
+
+@pytest.mark.parametrize("mode", ["agent", "workflow"])
+def test_output_failure_count_is_per_execution_and_legacy_is_unclassified(mode):
+    classified = output_failure(mode)
+    legacy = output_failure(mode, metadata=False)
+    incomplete = output_failure(mode)
+    incomplete.state = "incomplete"
+    other_error = output_failure(mode)
+    other_error.request.error_code = "database_error"
+    success = output_failure(mode)
+    success.state = success.request.status = "completed"
+    success.execution_success = True
+    not_started = output_failure(mode)
+    not_started.started = False
+    not_started.state = "environment_error"
+    items = [classified, legacy, incomplete, other_error, success, not_started]
+    summary = summarize(items, [])
+    for group in (summary["by_mode"][mode], summary["by_case_mode"][f"C03:{mode}"]):
+        assert group["invalid_output"] == {
+            "count": 2,
+            "rate": {"numerator": 2, "denominator": 5, "value": 0.4},
+            "classified_count": 1,
+            "unclassified_count": 1,
+            "by_reason": [{
+                "failure_stage": "diagnosis_schema",
+                "failure_reason": "validation_error", "count": 1,
+            }],
+        }
+        assert group["execution_success"] == {"numerator": 1, "denominator": 5, "value": 0.2}
+
+
+@pytest.mark.parametrize("finals,metadata,classified", [(0, True, 0), (2, True, 0), (1, False, 0), (1, True, 1)])
+def test_output_failure_ambiguous_or_partial_traces(finals, metadata, classified):
+    execution = output_failure(trace_count=finals, metadata=metadata)
+    detail = summarize([execution], [])["by_mode"]["agent"]["invalid_output"]
+    assert detail["count"] == 1
+    assert detail["classified_count"] == classified
+    assert detail["unclassified_count"] == 1 - classified
+    assert sum(r["count"] for r in detail["by_reason"]) == classified
+
+
+def test_output_failure_ordering_and_zero_denominator():
+    schema = output_failure()
+    evidence_failure = output_failure()
+    evidence_failure.traces[0].failure_metadata = FailureMetadata(
+        failure_stage="evidence_reference", failure_reason="invalid_trace_reference"
+    )
+    detail = summarize([evidence_failure, schema, output_failure()], [])["by_mode"]["agent"]["invalid_output"]
+    assert [r["failure_stage"] for r in detail["by_reason"]] == ["diagnosis_schema", "evidence_reference"]
+    assert [r["count"] for r in detail["by_reason"]] == [2, 1]
+    empty = summarize([], [])["by_mode"]["agent"]["invalid_output"]
+    assert empty == {
+        "count": 0, "rate": {"numerator": 0, "denominator": 0, "value": None},
+        "classified_count": 0, "unclassified_count": 0, "by_reason": [],
+    }
+    missing_result = output_failure()
+    missing_result.request = None
+    missing_result.state = "incomplete"
+    zero = summarize([missing_result], [])["by_mode"]["agent"]["invalid_output"]
+    assert zero["rate"] == {"numerator": 0, "denominator": 1, "value": 0}
+    assert zero["by_reason"] == []
+
+
+def test_mixed_final_results_are_not_a_unique_failure_source():
+    execution = output_failure()
+    execution.traces.append(TraceDTO(sequence=4, event_type="final_result", created_at=NOW))
+    detail = summarize([execution], [])["by_mode"]["agent"]["invalid_output"]
+    assert detail["classified_count"] == 0
+    assert detail["unclassified_count"] == 1

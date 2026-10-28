@@ -21,7 +21,13 @@ from openai import (
 
 from app.config import Settings
 from app.diagnosis.runtime import ExecutionBudget, ExecutionFailure, add_trace
-from app.schemas.support import DiagnosisDTO, LLMErrorMetadata, LLMMetadata, TraceDTO
+from app.schemas.support import (
+    DiagnosisDTO,
+    FailureMetadata,
+    LLMErrorMetadata,
+    LLMMetadata,
+    TraceDTO,
+)
 
 
 def classify_llm_error(exc: Exception) -> LLMErrorMetadata:
@@ -179,7 +185,12 @@ def call_model(
     ):
         raise ExecutionFailure("model_refusal")
     if data.get("status") != "completed":
-        raise ExecutionFailure("invalid_output")
+        raise ExecutionFailure(
+            "invalid_output",
+            failure_metadata=FailureMetadata(
+                failure_stage="response_status", failure_reason="not_completed"
+            ),
+        )
     return data
 
 

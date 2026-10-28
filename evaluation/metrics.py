@@ -192,6 +192,40 @@ def ratio(numerator: int, denominator: int) -> dict:
     }
 
 
+def invalid_output_summary(started: list) -> dict:
+    failures = [
+        execution for execution in started
+        if execution.state == "failed"
+        and execution.request is not None
+        and execution.request.status == "failed"
+        and execution.request.error_code == "invalid_output"
+    ]
+    counts = Counter()
+    for execution in failures:
+        finals = [
+            trace for trace in execution.traces
+            if trace.event_type == "final_result"
+        ]
+        if (
+            len(finals) == 1
+            and finals[0].error_code == "invalid_output"
+            and finals[0].failure_metadata is not None
+        ):
+            metadata = finals[0].failure_metadata
+            counts[(metadata.failure_stage, metadata.failure_reason)] += 1
+    classified = sum(counts.values())
+    return {
+        "count": len(failures),
+        "rate": ratio(len(failures), len(started)),
+        "classified_count": classified,
+        "unclassified_count": len(failures) - classified,
+        "by_reason": [
+            {"failure_stage": stage, "failure_reason": reason, "count": count}
+            for (stage, reason), count in sorted(counts.items())
+        ],
+    }
+
+
 def summarize(
     executions: list, judgments: list[dict], *, run_status="collected", calibration=None
 ) -> dict:
@@ -229,6 +263,7 @@ def summarize(
                 verdicts["correct"], verdicts["correct"] + verdicts["incorrect"]
             ),
             "execution_success": ratio(len(successful), len(started)),
+            "invalid_output": invalid_output_summary(started),
             "all_started": {
                 metric: numeric_statistics(started, metric)
                 for metric in NUMERIC_METRICS

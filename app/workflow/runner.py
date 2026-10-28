@@ -10,7 +10,7 @@ from app.diagnosis.llm import call_model, extract_output_text
 from app.diagnosis.prompts import OUTPUT_CONTRACT
 from app.diagnosis.runtime import ExecutionBudget, ExecutionFailure, add_trace
 from app.diagnosis.tools import execute_observed_tool
-from app.schemas.support import TraceDTO
+from app.schemas.support import FailureMetadata, TraceDTO
 from app.services import policy
 from app.services.customer import CallerContext
 
@@ -95,8 +95,18 @@ def run_workflow(
         now=now,
     )
     if any(item.get("type") == "function_call" for item in data.get("output", [])):
-        raise ExecutionFailure("invalid_output")
+        raise ExecutionFailure(
+            "invalid_output",
+            failure_metadata=FailureMetadata(
+                failure_stage="workflow_output", failure_reason="unexpected_function_call"
+            ),
+        )
     final = extract_output_text(data)
     if not final.strip():
-        raise ExecutionFailure("invalid_output")
+        raise ExecutionFailure(
+            "invalid_output",
+            failure_metadata=FailureMetadata(
+                failure_stage="text_extraction", failure_reason="empty_output"
+            ),
+        )
     return final

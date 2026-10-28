@@ -7,7 +7,9 @@ import pytest
 from app.config import Settings
 from evaluation.dataset import EvaluationError, load_bundle
 from evaluation.metrics import load_pricing
-from evaluation.results import ResultStore, build_manifest
+from evaluation.results import ResultStore, build_manifest, prepare_regrade
+from app.schemas.support import FailureMetadata, RequestDTO, TraceDTO
+from app.seed import uid
 from evaluation.runner import execution_plan
 from tests.test_support_models import NOW
 
@@ -88,3 +90,64 @@ def test_artifact_link_validation(tmp_path, bad):
     file.write_text(json.dumps(data))
     with pytest.raises(EvaluationError, match="invalid_result_artifacts"):
         ResultStore.load(store.directory)
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_failure_metadata_roundtrip_preserves_source(tmp_path, monkeypatch, legacy):
+    from app.diagnosis import llm
+    from app.services import support
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Diagnosis or LLM calls are forbidden during result loading/regrade preparation")
+
+    monkeypatch.setattr(llm, "responses_create", forbidden)
+    monkeypatch.setattr(support, "diagnose_request", forbidden)
+    store = make_store(tmp_path / "source")
+    execution = store.executions[0]
+    request_id = uuid4()
+    execution.request_id = str(request_id)
+    execution.state = "failed"
+    execution.started = True
+    execution.execution_success = False
+    execution.elapsed_ms = 25
+    execution.request = RequestDTO(
+        id=request_id, requester_user_id=uid(0x101), organization_id=uid(1),
+        content="문의", status="failed", execution_mode=execution.mode,
+        created_at=NOW, started_at=NOW, finished_at=NOW, diagnosis=None,
+        error_code="invalid_output",
+    )
+    metadata = FailureMetadata(
+        failure_stage="diagnosis_schema", failure_reason="validation_error",
+        field_path="summary",
+    )
+    execution.traces = [
+        TraceDTO(sequence=1, event_type="execution_started", created_at=NOW),
+        TraceDTO(sequence=2, event_type="final_result", created_at=NOW,
+                 error_code="invalid_output", failure_metadata=metadata),
+        TraceDTO(sequence=3, event_type="execution_failed", created_at=NOW,
+                 error_code="invalid_output"),
+    ]
+    execution.metrics = {"latency_ms": {"value": 25, "observed": 25, "complete": True}}
+    store.initialize()
+    if legacy:
+        file = store.directory / "executions.json"
+        data = json.loads(file.read_text())
+        for item in data["items"]:
+            for trace in item["traces"]:
+                trace.pop("failure_metadata", None)
+        file.write_text(json.dumps(data))
+    before = {p.name: p.read_bytes() for p in store.directory.glob("*.json")}
+    restored = ResultStore.load(store.directory)
+    actual = restored.executions[0]
+    assert actual.traces[1].failure_metadata == (None if legacy else metadata)
+    assert actual.metrics == execution.metrics
+    assert actual.request == execution.request
+    target = prepare_regrade(restored, load_bundle(), load_pricing())
+    assert target.executions == restored.executions
+    assert ResultStore.load(target.directory).executions == restored.executions
+    from evaluation.dataset import sha256
+
+    assert target.manifest.source["sha256"] == {
+        name: sha256(value) for name, value in before.items()
+    }
+    assert {p.name: p.read_bytes() for p in store.directory.glob("*.json")} == before
