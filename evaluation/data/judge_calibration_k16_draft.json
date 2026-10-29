@@ -1,0 +1,30 @@
+{
+  "example_id": "K16",
+  "case_id": "C01",
+  "scenario": "ambiguous",
+  "critical_error": null,
+  "diagnosis": {
+    "outcome": "diagnosed",
+    "summary": "일반 구성원에게 초대 권한이 없어 초대가 차단됩니다. 결제 실패 여부도 확인해야 합니다. 해당 문제는 이번 초대 실패의 원인으로 확인되었습니다.",
+    "causes": [
+      "일반 구성원 권한 부족",
+      "결제 실패 여부 확인"
+    ],
+    "next_actions": [
+      "초대 시 표시된 오류 메시지를 알려 주세요."
+    ],
+    "evidence": [
+      {
+        "trace_sequence": 1,
+        "policy_document_id": "permissions",
+        "statement": "합성 Calibration 예시: 요청자는 member이며 초대 권한이 없다."
+      }
+    ]
+  },
+  "human": {
+    "label": null,
+    "reason": null,
+    "reviewer": null,
+    "review_version": "human-review-v2"
+  }
+}

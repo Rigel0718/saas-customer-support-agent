@@ -1,0 +1,17 @@
+{
+  "pricing_version": "2026-10-26-v1",
+  "as_of": "2026-10-26",
+  "currency": "USD",
+  "source": "https://developers.openai.com/api/docs/models/gpt-5-mini",
+  "assumptions": "Uncached standard input rate. No cache adjustment, discounts, taxes or negotiated rates. Estimated cost, not billed cost.",
+  "models": {
+    "gpt-5-mini": {
+      "input_usd_per_million": "0.25",
+      "output_usd_per_million": "2.00"
+    },
+    "gpt-5-mini-2025-08-07": {
+      "input_usd_per_million": "0.25",
+      "output_usd_per_million": "2.00"
+    }
+  }
+}
