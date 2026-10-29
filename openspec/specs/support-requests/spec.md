@@ -41,7 +41,7 @@
 - **THEN** 409를 반환하고 저장된 방식·진단·Trace를 유지하며 추가 실행하지 않는다
 
 ### Requirement: 문의 결과 및 Trace 조회
-시스템은 GET /support/requests/{id}로 execution_mode를 포함한 문의 표현을, GET /support/requests/{id}/traces로 sequence 오름차순의 items 배열을 반환해야 한다(MUST). 진단은 outcome, summary, causes, next_actions, evidence를 포함해야 한다(MUST). Trace는 sequence, event_type, step, call_id, tool_name, arguments, observation, error_code, duration_ms, created_at 및 LLM 호출의 model/response_id/usage를 제공해야 한다(MUST). 해당 없는 필드는 null로 표현해야 한다(MUST).
+시스템은 GET /support/requests/{id}로 execution_mode를 포함한 문의 표현을, GET /support/requests/{id}/traces로 sequence 오름차순의 items 배열을 반환해야 한다(MUST). 진단은 outcome, summary, causes, next_actions, evidence를 포함해야 한다(MUST). Trace는 sequence, event_type, step, call_id, tool_name, arguments, observation, error_code, duration_ms, created_at 및 LLM 호출의 model/response_id/usage와 nullable llm_metadata를 제공해야 한다(MUST). 해당 없는 필드는 null로 표현해야 한다(MUST).
 
 #### Scenario: 실행 전과 실행 후 Trace
 - **WHEN** 실행 전 문의와 두 방식으로 각각 종료된 문의의 Trace를 조회한다
@@ -50,6 +50,14 @@
 #### Scenario: 실행 중 조회
 - **WHEN** 동기 실행이 진행 중인 문의를 다른 요청에서 조회한다
 - **THEN** running과 확정된 execution_mode 및 null diagnosis를 반환하며 Trace는 종료 저장 전에는 빈 배열일 수 있다
+
+#### Scenario: LLM 메타데이터 조회
+- **WHEN** 변경 이후 성공 또는 `llm_error`로 종료된 실행의 LLM Trace를 조회한다
+- **THEN** llm_metadata에 실제 적용 요청 Timeout이 있고, `llm_error`이면 안전하게 정규화한 예외 타입·감지된 Timeout 여부·확인 가능한 HTTP Status가 있으며 민감한 예외 원문은 없다
+
+#### Scenario: 해당 없는 이벤트와 이전 Trace
+- **WHEN** LLM 호출 이외의 이벤트 또는 메타데이터 도입 전 저장된 Trace를 조회한다
+- **THEN** llm_metadata는 null이고 기존 observation·usage·오류 코드·순서·진단 내용은 유지된다
 
 ### Requirement: 지원 데이터의 조직 격리
 문의 생성·두 방식의 실행·결과·Trace API는 기존 Bearer 인증을 사용하고 동일 조직의 owner/admin/member에게 같은 접근을 제공해야 한다(MUST). 다른 조직의 문의와 존재하지 않는 문의는 같은 404 not_found로 처리해야 한다(MUST). 인증 실패는 401이며 요청 body, 조직 헤더, 문의 본문 또는 LLM 식별자가 인증 범위를 변경해서는 안 된다(MUST).
@@ -106,3 +114,57 @@
 #### Scenario: 기존 DB 데이터 호환
 - **WHEN** 변경 전 pending/running/completed/failed 문의가 있는 DB에 변경을 적용한다
 - **THEN** pending의 execution_mode는 null이고 기존 실행 상태 세 종류는 agent로 보존되며 기존 결과·Trace·관계가 유지된다
+
+### Requirement: LLM 메타데이터의 종료 저장과 데이터 호환
+새 LLM 메타데이터는 기존 종료 상태·진단·전체 Trace와 함께 원자적으로 저장해야 한다(MUST). 기존 DB에 새 저장 필드를 추가할 때 이전 행은 null로 유지하고 기존 문의·Trace·관계·진단을 보존해야 한다(MUST). 기존 조직 격리와 DB 실패 계약을 유지하고, 메타데이터를 Diagnosis 근거 관찰로 취급해서는 안 된다(MUST).
+
+#### Scenario: 두 모드의 저장 및 재조회
+- **WHEN** Agent와 Workflow가 각각 성공 또는 처리된 LLM 실패 후 종료 저장된다
+- **THEN** 별도 세션으로 조회한 메타데이터와 수집값이 같고 기존 completed/failed·diagnosis·error_code 계약이 유지된다
+
+#### Scenario: 종료 저장 실패
+- **WHEN** 메타데이터를 포함한 종료 저장이 실패한다
+- **THEN** 기존 계약대로 전체 종료 트랜잭션을 rollback하고 503을 반환하며 메타데이터만 부분 저장하지 않는다
+
+#### Scenario: 기존 데이터가 있는 DB 전환
+- **WHEN** 이전 문의·진단·Trace가 있는 DB에 새 저장 필드를 추가한다
+- **THEN** 이전 레코드 내용·관계·개수는 유지되고 새 필드만 null이며 빈 DB 초기화에서도 동일 저장 구조를 사용할 수 있다
+
+### Requirement: 출력 실패 메타데이터의 Trace 조회
+기존 Trace 조회는 nullable `failure_metadata`를 제공해야 한다(MUST). 새 출력 실패의 final_result에는 diagnosis-output-failures 계약의 단계·사유·선택적 필드 경로가 있고 다른 이벤트·정상 결과·이전 기록에는 null이어야 한다(MUST). 기존 llm_metadata·Trace 순서·문의 응답·error_code·HTTP 상태를 유지해야 한다(MUST).
+
+#### Scenario: 두 Mode의 실패 조회
+- **WHEN** Agent 또는 Workflow가 invalid_output으로 종료된 뒤 같은 조직에서 Trace를 조회한다
+- **THEN** sequence 오름차순 items의 유일한 final_result에 failure_metadata가 있고 execution_failed에는 기존 오류 코드와 null failure_metadata가 있다
+- **THEN** 문의 진단/결과 응답은 기존처럼 failed·diagnosis=null·error_code=invalid_output이며 처리된 실패는 200을 반환한다
+
+#### Scenario: 정상 및 이전 기록 조회
+- **WHEN** 정상 실행, 출력 실패 final_result가 없는 다른 오류의 실행 또는 새 필드 도입 전의 Trace를 조회한다
+- **THEN** failure_metadata는 null이고 기존 진단·관찰·usage·llm_metadata·순서·오류 코드가 유지된다
+
+### Requirement: 출력 실패 메타데이터의 원자적 저장과 권한
+출력 실패 metadata는 기존 문의 종료 상태·전체 Trace와 함께 원자적으로 저장하거나 취소해야 한다(MUST). 별도 저장소나 로그로 우회 저장해서는 안 되며 기존 조직 경계·rollback·503·중복 실행 계약을 유지해야 한다(MUST). metadata를 Diagnosis 근거나 모델/Judge 입력으로 사용해서는 안 된다(MUST).
+
+#### Scenario: 저장과 별도 세션 재조회
+- **WHEN** 두 Mode의 invalid_output 종료 저장에 성공한다
+- **THEN** 별도 세션과 Trace API에서 수집한 metadata가 같고 Diagnosis는 저장되지 않으며 failed 문의 재실행은 409다
+
+#### Scenario: 종료 저장 장애
+- **WHEN** metadata를 포함한 종료 저장이 실패한다
+- **THEN** 기존 계약대로 전체 종료 트랜잭션을 rollback하고 503을 반환하며 metadata만 부분 저장하지 않는다
+- **THEN** 기존 실패 기록 저장도 불가능하면 새 metadata가 유실될 수 있고 추정 정보로 채우지 않는다
+
+#### Scenario: 조직 경계
+- **WHEN** 다른 조직의 호출자가 metadata가 포함된 문의의 Trace를 조회하거나 인증 없이 접근한다
+- **THEN** 기존과 동일하게 각각 404 또는 401을 반환하며 metadata는 노출되지 않는다
+
+### Requirement: 출력 실패 필드 도입의 데이터 및 Consumer 호환
+새 저장 필드는 nullable이며 도입 시 이전 행을 null로 유지하고 기존 문의·진단·Trace·관계·개수를 보존해야 한다(MUST). 새 Reader는 필드 없는 이전 Trace를 읽어야 한다(MUST). Trace API 필드 추가 및 이전 strict Consumer의 새 결과 거부 가능성을 문서에 명시하고 기존 실패를 backfill해서는 안 된다(MUST).
+
+#### Scenario: 기존 DB와 신규 초기화
+- **WHEN** 이전 기록이 있는 테스트 소유 schema에 저장 필드를 추가하거나 빈 DB를 초기화한다
+- **THEN** 기존 행의 새 필드는 null이고 내용·관계·개수·llm_metadata가 보존되며 신규 초기화도 동일한 저장 구조를 제공한다
+
+#### Scenario: Consumer 호환 범위
+- **WHEN** 갱신된 Reader로 새 필드 없는 Trace를 읽거나 새 Trace 형식을 배포한다
+- **THEN** 전자는 null로 읽으며 배포 안내는 새 필드를 모르는 strict Consumer의 갱신 필요성과 문의 error_code 계약 불변을 구분한다
