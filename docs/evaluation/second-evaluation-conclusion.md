@@ -47,7 +47,9 @@
 - **Agent 한도:** 8 steps / 16 Tool calls
 - **모드 순서:** 홀수 회차는 Agent→Workflow, 짝수 회차는 Workflow→Agent
 - **실행 방식:** 매번 새 문의를 만들고 격리된 schema에서 실행했다.
-- **코드:** commit `8c92e0d`에 이번 Change의 미커밋 변경이 얹힌 상태(`dirty=true`)다. 파일별 SHA-256은 각 manifest의 `provenance.code`에 기록되어 있다.
+- **코드:** 실행 당시 commit `8c92e0d`에 이번 Change의 미커밋 변경이 얹힌 상태(`dirty=true`)였다. 파일별 SHA-256은 각 manifest의 `provenance.code`에 기록되어 있다.
+  - 실행 후 커밋한 `812c21d`는 access-48-v2 manifest의 파일 해시 40개와 모두 일치한다. 따라서 access-48-v2는 이 커밋으로 재현할 수 있다.
+  - access-48-v1은 `evaluation/access_pilot.py` 1개만 다르다. v1 이후 실행마다 결과를 저장하는 기능을 추가했기 때문이다. 진단 로직(`app/`)은 v2와 같다. manifest의 `dirty=true` 기록은 실행 당시 사실이므로 수정하지 않는다.
 
 원본은 로컬 `.evaluation-results/access-48-v{1,2}/`에 있다. 이 디렉터리는 Git 추적 대상이 아니므로 따로 보존해야 한다. 아래 SHA-256은 사람 라벨을 확정한 뒤의 값이다.
 
