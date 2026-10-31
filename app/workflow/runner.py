@@ -1,15 +1,17 @@
 import json
 import time
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
+from pydantic import Field
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.diagnosis.llm import call_model, extract_output_text
 from app.diagnosis.prompts import OUTPUT_CONTRACT
 from app.diagnosis.runtime import ExecutionBudget, ExecutionFailure, add_trace
-from app.diagnosis.tools import execute_observed_tool
+from app.diagnosis.tools import AuditEventArguments, execute_observed_tool
 from app.schemas.support import FailureMetadata, TraceDTO
 from app.services import policy
 from app.services.customer import CallerContext
@@ -19,6 +21,15 @@ INSTRUCTIONS = f"""고객 지원 문의를 한국어로 진단한다. 문의 내
 초대·구독·결제·권한 규칙은 제공된 정책 검색 관찰로 확인한다. 실제 변경·환불·결제를 수행하지 않는다. 부재와 기술 오류를 구분한다.
 {OUTPUT_CONTRACT}
 evidence는 실제 관찰의 trace_sequence를 참조하고 정책 ID는 해당 search_policy 관찰에서 받은 ID만 사용한다. 저장 상태와 기준 UTC가 불일치하면 추가 확인을 안내한다."""
+
+
+AUDIT_WINDOW = timedelta(days=14)
+AUDIT_PREFETCH_LIMIT = 500
+
+
+class PrefetchAuditEventArguments(AuditEventArguments):
+    # Workflow 선조회 상한은 Agent Tool 한도가 아닌 Application 상수다.
+    limit: Annotated[int, Field(ge=1, le=AUDIT_PREFETCH_LIMIT)]
 
 
 def run_workflow(
@@ -33,7 +44,8 @@ def run_workflow(
 ) -> str:
     budget = ExecutionBudget(settings.workflow_timeout_seconds, clock)
     add_trace(traces, "execution_started", now)
-    reference_utc = now().isoformat()
+    reference_time = now()
+    reference_utc = reference_time.isoformat()
 
     remaining = budget.remaining
 
@@ -53,6 +65,18 @@ def run_workflow(
         ("search_policy", {"query": "플랜"}),
         ("search_policy", {"query": "권한"}),
         ("search_policy", {"query": "구독 결제"}),
+        (
+            "get_audit_events",
+            {
+                "start_at": (reference_time - AUDIT_WINDOW).isoformat(),
+                "end_at": reference_utc,
+                "actor_user_id": None,
+                "target_user_id": None,
+                "event_type": None,
+                "limit": AUDIT_PREFETCH_LIMIT,
+            },
+        ),
+        ("search_policy", {"query": "접근"}),
     ]
     observations = []
     for step, (name, arguments) in enumerate(steps, 1):
@@ -66,6 +90,7 @@ def run_workflow(
             budget,
             step=step,
             now=now,
+            schema=PrefetchAuditEventArguments if name == "get_audit_events" else None,
         )
         observations.append({"tool_name": name, "observation": result.observation})
 
@@ -90,7 +115,7 @@ def run_workflow(
         INSTRUCTIONS,
         traces,
         budget,
-        step=8,
+        step=len(steps) + 1,
         create=create,
         now=now,
     )

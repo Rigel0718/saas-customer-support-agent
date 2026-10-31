@@ -1,9 +1,17 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -23,12 +31,40 @@ class OrganizationArguments(BaseModel):
     organization_id: UUID
 
 
+class AuditEventArguments(BaseModel):
+    # strict Tool schema를 위해 필터는 nullable 필수 인자로 둔다.
+    model_config = ConfigDict(extra="forbid")
+    start_at: AwareDatetime | None
+    end_at: AwareDatetime | None
+    actor_user_id: UUID | None
+    target_user_id: UUID | None
+    event_type: (
+        Literal[
+            "role_changed",
+            "subscription_status_changed",
+            "member_invited",
+            "user_login",
+            "document_viewed",
+            "document_edited",
+        ]
+        | None
+    )
+    limit: Annotated[int, Field(ge=1, le=50)]
+
+    @model_validator(mode="after")
+    def ordered_range(self):
+        if self.start_at and self.end_at and self.start_at > self.end_at:
+            raise ValueError("start_at must not be after end_at")
+        return self
+
+
 ARGUMENTS = {
     "get_user": UserArguments,
     "get_organization": OrganizationArguments,
     "get_subscription": OrganizationArguments,
     "get_payment_history": OrganizationArguments,
     "search_policy": policy.PolicyQuery,
+    "get_audit_events": AuditEventArguments,
 }
 
 
@@ -50,11 +86,13 @@ def execute_tool(
     return _execute_validated_tool(name, arguments, session, context, documents, sequence)
 
 
-def _validate_arguments(name: str, raw_arguments: str) -> BaseModel | None:
+def _validate_arguments(
+    name: str, raw_arguments: str, schema: type[BaseModel] | None = None
+) -> BaseModel | None:
     if name not in ARGUMENTS:
         return None
     try:
-        return ARGUMENTS[name].model_validate_json(raw_arguments)
+        return (schema or ARGUMENTS[name]).model_validate_json(raw_arguments)
     except (ValidationError, TypeError, ValueError):
         return None
 
@@ -114,9 +152,10 @@ def execute_observed_tool(
     step: int,
     call_id: str | None = None,
     now: Callable = lambda: datetime.now(timezone.utc),
+    schema: type[BaseModel] | None = None,
 ) -> ToolResult:
     seconds = budget.remaining()
-    arguments = _validate_arguments(name, raw_arguments)
+    arguments = _validate_arguments(name, raw_arguments, schema)
     validated = arguments.model_dump(mode="json") if arguments is not None else None
     before = budget.clock()
     try:

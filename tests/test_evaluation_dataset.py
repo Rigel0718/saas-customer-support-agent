@@ -15,7 +15,7 @@ def test_fixed_dataset_and_separate_gt():
     assert len(bundle.truth("C05").primary_causes) == 3
     assert len(bundle.provenance["gt"]["sha256"]) == 64
     assert "primary_causes" not in bundle.dataset.model_dump_json()
-    assert len(bundle.provenance["policies"]["files"]) == 3
+    assert len(bundle.provenance["policies"]["files"]) == 4
 
 
 @pytest.mark.parametrize(

@@ -40,3 +40,25 @@ class PaymentDTO(DTO):
 
 class PaymentHistoryDTO(DTO):
     items: list[PaymentDTO]
+
+
+class AuditEventDTO(DTO):
+    id: UUID
+    occurred_at: datetime
+    actor_user_id: UUID | None
+    event_type: Literal[
+        "role_changed",
+        "subscription_status_changed",
+        "member_invited",
+        "user_login",
+        "document_viewed",
+        "document_edited",
+    ]
+    target_user_id: UUID | None
+    payload: dict
+
+
+class AuditEventPageDTO(DTO):
+    items: list[AuditEventDTO]
+    total_count: int
+    truncated: bool

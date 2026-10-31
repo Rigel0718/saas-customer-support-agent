@@ -102,6 +102,8 @@ def test_model_requests_preserve_instructions_options_and_target(session, mode):
                 "search_policy",
                 "search_policy",
                 "search_policy",
+                "get_audit_events",
+                "search_policy",
             ]
             assert [item["observation"] for item in observations] == [
                 trace.observation

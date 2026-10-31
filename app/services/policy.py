@@ -28,7 +28,12 @@ def load_policies(directory: Path = POLICY_DIR) -> list[PolicyDocument]:
         PolicyDocument.model_validate(
             json.loads((directory / name).read_text(encoding="utf-8"))
         )
-        for name in ("plans.json", "permissions.json", "troubleshooting.json")
+        for name in (
+            "plans.json",
+            "permissions.json",
+            "troubleshooting.json",
+            "workspace_access.json",
+        )
     ]
     if len({doc.document_id for doc in documents}) != len(documents):
         raise ValueError("Duplicate policy identifier")

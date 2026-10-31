@@ -41,7 +41,7 @@ def test_workflow_durable_e2e(durable_app, durable_db, token, outcome):
             assert payload["requester_user_id"] == created["requester_user_id"]
             assert payload["organization_id"] == created["organization_id"]
             obs = payload["observations"]
-            assert len(obs) == 7
+            assert len(obs) == 9
             assert all(o["observation"]["ok"] for o in obs if token != "empty-token")
             if token == "member-token":
                 assert obs[0]["observation"]["data"]["role"] == "member"
@@ -72,12 +72,12 @@ def test_workflow_durable_e2e(durable_app, durable_db, token, outcome):
         assert result["diagnosis"]["outcome"] == outcome
         assert client.get(path, headers=headers(token)).json() == result
         traces = client.get(path + "/traces", headers=headers(token)).json()["items"]
-        assert [t["sequence"] for t in traces] == list(range(1, 12))
+        assert [t["sequence"] for t in traces] == list(range(1, 14))
         assert [t["event_type"] for t in traces] == ["execution_started"] + [
             "tool_result"
-        ] * 7 + ["llm_response", "final_result", "execution_completed"]
-        assert traces[8]["usage"]["total_tokens"] == 120
-        assert traces[8]["duration_ms"] >= 0
+        ] * 9 + ["llm_response", "final_result", "execution_completed"]
+        assert traces[10]["usage"]["total_tokens"] == 120
+        assert traces[10]["duration_ms"] >= 0
         assert len(fake.calls) == 1
         with Session(durable_db) as other:
             assert other.get(SupportRequest, created["id"]).execution_mode == "workflow"
@@ -99,7 +99,7 @@ def test_workflow_durable_e2e(durable_app, durable_db, token, outcome):
                         )
                     )
                 )
-                == 11
+                == 13
             )
     assert snapshot(durable_db) == before
     assert [p.model_dump() for p in policy.load_policies()] == policies_before
@@ -262,7 +262,7 @@ def test_shared_evaluation_conditions_preserve_execution_differences(
     assert len(agent.calls) == 2 and len(workflow.calls) == 1
     assert len([t for t in records["agent"] if t["event_type"] == "tool_result"]) == 2
     assert (
-        len([t for t in records["workflow"] if t["event_type"] == "tool_result"]) == 7
+        len([t for t in records["workflow"] if t["event_type"] == "tool_result"]) == 9
     )
     for traces in records.values():
         found = next(t for t in traces if t["tool_name"] == "search_policy")

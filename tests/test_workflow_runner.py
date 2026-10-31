@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -22,6 +23,8 @@ NAMES = [
     "get_payment_history",
     "search_policy",
     "search_policy",
+    "search_policy",
+    "get_audit_events",
     "search_policy",
 ]
 
@@ -68,24 +71,45 @@ def test_fixed_steps_and_shared_observations(session):
     observations = data["observations"]
     assert [o["tool_name"] for o in observations] == NAMES
     assert [o["observation"]["trace_sequence"] for o in observations] == list(
-        range(2, 9)
+        range(2, 11)
     )
     assert observations[0]["observation"]["data"]["role"] == "member"
     tools = [t for t in traces if t.event_type == "tool_result"]
-    assert [t.step for t in tools] == list(range(1, 8))
-    assert [t.arguments["query"] for t in tools[4:]] == ["플랜", "권한", "구독 결제"]
+    assert [t.step for t in tools] == list(range(1, 10))
+    assert [t.arguments["query"] for t in tools[4:7]] == ["플랜", "권한", "구독 결제"]
+    assert tools[7].arguments == {
+        "start_at": (NOW - timedelta(days=14)).isoformat().replace("+00:00", "Z"),
+        "end_at": NOW.isoformat().replace("+00:00", "Z"),
+        "actor_user_id": None,
+        "target_user_id": None,
+        "event_type": None,
+        "limit": 500,
+    }
+    assert tools[8].arguments == {"query": "접근"}
     assert all(t.call_id is None and t.duration_ms == 0 for t in tools)
     assert [o["observation"] for o in observations] == [t.observation for t in tools]
     docs = policy.load_policies()
     from app.diagnosis.tools import execute_tool
 
     ctx = customer.authenticate(session, uid(0x102))
-    for t in tools:
+    for t in tools[:7] + tools[8:]:
         expected = execute_tool(
             t.tool_name, json.dumps(t.arguments), session, ctx, docs, t.sequence
         )
         assert expected.observation == t.observation
-    assert traces[-1].event_type == "llm_response" and traces[-1].step == 8
+    # Workflow 선조회 상한 500은 Agent Tool 한도(50)를 넘으므로 Agent 경로에서는 거부된다.
+    rejected = execute_tool(
+        "get_audit_events", json.dumps(tools[7].arguments), session, ctx, docs, 9
+    )
+    assert rejected.observation["error_code"] == "invalid_arguments"
+    assert tools[7].observation["data"] == customer.get_audit_events(
+        session,
+        ctx,
+        start_at=NOW - timedelta(days=14),
+        end_at=NOW,
+        limit=500,
+    ).model_dump(mode="json")
+    assert traces[-1].event_type == "llm_response" and traces[-1].step == 10
 
 
 @pytest.mark.parametrize("outcome", ["diagnosed", "needs_information", "escalate"])
@@ -173,7 +197,7 @@ def test_single_model_failure(session, output, code):
     with pytest.raises(ExecutionFailure, match=code) as exc:
         run(session, fake)
     assert len(fake.calls) == 1
-    assert len([t for t in exc.value.traces if t.event_type == "tool_result"]) == 7
+    assert len([t for t in exc.value.traces if t.event_type == "tool_result"]) == 9
     assert len([t for t in exc.value.traces if t.event_type == "llm_response"]) == 1
     assert "private" not in json.dumps(
         [t.model_dump(mode="json") for t in exc.value.traces]
@@ -239,7 +263,7 @@ def test_budget_stops_further_work(session, monkeypatch, stage):
         )
     assert len(fake.calls) == (1 if stage == "llm" else 0)
     tools = [t for t in exc.value.traces if t.event_type == "tool_result"]
-    assert len(tools) == (7 if stage == "llm" else 1 if stage == "tool" else 0)
+    assert len(tools) == (9 if stage == "llm" else 1 if stage == "tool" else 0)
 
 
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
@@ -253,3 +277,43 @@ def test_workflow_timeout_environment(monkeypatch):
     monkeypatch.setenv("DEV_BEARER_TOKENS", json.dumps({"fake": str(uid(0x101))}))
     monkeypatch.setenv("WORKFLOW_TIMEOUT_SECONDS", "12.5")
     assert Settings.from_env().workflow_timeout_seconds == 12.5
+
+
+def test_audit_prefetch_is_capped_and_reports_truncation(session):
+    from app.models import AuditEvent
+
+    session.add_all(
+        AuditEvent(
+            id=uid(0xB0000 + number),
+            organization_id=uid(1),
+            occurred_at=NOW - timedelta(minutes=number),
+            actor_user_id=uid(0x101),
+            event_type="user_login",
+            target_user_id=None,
+            payload={},
+        )
+        for number in range(1, 503)
+    )
+    # 14일 범위 밖 이벤트는 total_count에 포함하지 않는다.
+    session.add(
+        AuditEvent(
+            id=uid(0xC0001),
+            organization_id=uid(1),
+            occurred_at=NOW - timedelta(days=15),
+            actor_user_id=None,
+            event_type="role_changed",
+            target_user_id=uid(0x103),
+            payload={},
+        )
+    )
+    session.flush()
+    fake = ScriptedResponses([final("diagnosed", [evidence(2)])])
+    _, traces = run(session, fake)
+    audit = next(t for t in traces if t.tool_name == "get_audit_events")
+    data = audit.observation["data"]
+    assert len(data["items"]) == 500
+    assert data["total_count"] == 502 and data["truncated"] is True
+    assert data["items"][0]["id"] == str(uid(0xB0001))
+    assert len(fake.calls) == 1
+    sent = json.loads(fake.calls[0]["input"][0]["content"])["observations"]
+    assert sent[7]["observation"] == audit.observation

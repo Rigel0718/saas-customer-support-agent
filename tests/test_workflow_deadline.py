@@ -44,7 +44,7 @@ def test_workflow_cancels_local_sdk_io(session, monkeypatch, mode):
         assert server.disconnected.wait(1) and server.stopped.wait(1)
         assert len(server.records) == 1 and server.records[0]["retry_count"] == "0"
         assert all(c.is_closed for c in server.clients)
-        assert len([t for t in traces if t.event_type == "tool_result"]) == 7
+        assert len([t for t in traces if t.event_type == "tool_result"]) == 9
         assert traces[-1].event_type == "llm_response"
         assert traces[-1].error_code == "execution_timeout"
 
