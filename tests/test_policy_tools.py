@@ -14,7 +14,7 @@ from app.services import customer, policy
 
 def test_policies_and_search(tmp_path):
     documents = policy.load_policies()
-    assert len(documents) == 3 and len({x.document_id for x in documents}) == 3
+    assert len(documents) == 4 and len({x.document_id for x in documents}) == 4
     assert all(x.title and x.content and x.keywords for x in documents)
     assert "member_limit" in documents[0].content
     for query in (

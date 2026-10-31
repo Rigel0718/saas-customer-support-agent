@@ -104,7 +104,7 @@ def test_order_new_requests_shared_fixture_real_services_fake_responses(
         assert e.request.organization_id == record_id(
             guard.run_id, e.case_id, "organization"
         )
-        assert e.metrics["tool_calls"]["value"] == (2 if e.mode == "agent" else 7)
+        assert e.metrics["tool_calls"]["value"] == (2 if e.mode == "agent" else 9)
     with Session(guard.engine) as session:
         assert session.scalar(select(func.count()).select_from(SupportRequest)) == total
     restored = ResultStore.load(store.directory)

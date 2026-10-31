@@ -1,0 +1,89 @@
+{
+  "gt_version": "access-gt-v1",
+  "labeling_rules": [
+    "원인 식별은 멤버 관리를 막는 현재 조건(요청자 role=member 또는 subscription status=past_due)을 원인으로 명시하는 것이다. next_actions에서 확인을 권고하는 것만으로는 식별로 인정하지 않는다.",
+    "primary_causes를 모두 식별하고 excluded_causes를 원인으로 주장하지 않으며 expected_outcome과 일치해야 correct다.",
+    "required_facts는 맥락이다. 변경 시각·행위자·결제 실패 이력의 단순 생략은 오답이 아니다.",
+    "관찰된 사실과 모순되는 주장은 오답 근거다. 원인 이벤트가 존재하는데 해당 기간에 변경 이벤트가 없다고 단정하는 것도 포함한다(잘린 조회 결과를 근거로 한 단정 포함).",
+    "다른 사용자의 역할 변경 노이즈나 요청자의 과거 승격 이벤트를 맥락으로 언급하는 것은 허용하지만 원인으로 주장하면 오답이다.",
+    "Diagnosis가 없는 실패 실행은 not_applicable이며 정답률 분모에서 제외하고 실행 실패로 따로 센다."
+  ],
+  "cases": [
+    {
+      "case_id": "A01",
+      "expected_outcome": "diagnosed",
+      "primary_causes": ["role_demoted"],
+      "excluded_causes": [
+        "subscription_past_due",
+        "member_limit_reached",
+        "confirmed_service_outage",
+        "other_user_role_change"
+      ],
+      "required_facts": [
+        "요청자의 현재 role은 member이다.",
+        "기준 시각 20시간 전 관리자 B(admin_b)가 요청자의 role을 admin에서 member로 변경한 role_changed 이벤트가 있다.",
+        "구독은 active이며 기준 시각 30일 후 만료한다.",
+        "현재 인원 23명은 member_limit 28명보다 적다.",
+        "31일 전 성공 결제가 있으며 결제 실패는 없다."
+      ],
+      "policy_document_ids": ["workspace_access", "permissions"]
+    },
+    {
+      "case_id": "A02",
+      "expected_outcome": "diagnosed",
+      "primary_causes": ["subscription_past_due"],
+      "excluded_causes": [
+        "role_demoted",
+        "member_limit_reached",
+        "confirmed_service_outage",
+        "other_user_role_change"
+      ],
+      "required_facts": [
+        "요청자의 현재 role은 admin이다.",
+        "구독 status는 past_due이다.",
+        "기준 시각 22시간 전 system(actor 없음)이 payment_failed 사유로 구독을 active에서 past_due로 바꾼 subscription_status_changed 이벤트가 있다.",
+        "기준 시각 약 22시간 5분 전 failed 결제가 있다.",
+        "현재 인원 23명은 member_limit 28명보다 적다."
+      ],
+      "policy_document_ids": ["workspace_access", "troubleshooting"]
+    },
+    {
+      "case_id": "A03",
+      "expected_outcome": "diagnosed",
+      "primary_causes": ["role_demoted", "subscription_past_due"],
+      "excluded_causes": [
+        "member_limit_reached",
+        "confirmed_service_outage",
+        "other_user_role_change"
+      ],
+      "required_facts": [
+        "요청자의 현재 role은 member이며 기준 시각 20시간 전 관리자 B가 admin에서 member로 변경했다.",
+        "구독 status는 past_due이며 기준 시각 22시간 전 system이 payment_failed 사유로 변경했다.",
+        "기준 시각 약 22시간 5분 전 failed 결제가 있다.",
+        "멤버 관리는 owner/admin 역할과 active 구독을 모두 요구하므로 두 원인이 각각 독립적으로 기능을 막는다."
+      ],
+      "policy_document_ids": ["workspace_access", "permissions", "troubleshooting"]
+    },
+    {
+      "case_id": "A04",
+      "expected_outcome": "needs_information",
+      "primary_causes": [],
+      "excluded_causes": [
+        "role_demoted",
+        "subscription_past_due",
+        "member_limit_reached",
+        "confirmed_service_outage",
+        "other_user_role_change",
+        "old_role_change"
+      ],
+      "required_facts": [
+        "요청자의 현재 role은 admin이다.",
+        "구독은 active이며 기준 시각 30일 후 만료한다.",
+        "현재 인원 23명은 member_limit 28명보다 적다.",
+        "요청자 관련 이벤트는 기준 시각 5일 전 owner가 member에서 admin으로 승격한 role_changed뿐이며 멤버 관리를 막지 않는다.",
+        "관찰된 조건으로 원인을 확정할 수 없어 오류 내용·재현 정보 등 추가 정보가 필요하다."
+      ],
+      "policy_document_ids": ["workspace_access", "permissions"]
+    }
+  ]
+}

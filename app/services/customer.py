@@ -1,11 +1,15 @@
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.audit import AuditEvent
 from app.models.customer import Organization, Payment, Subscription, User
 from app.schemas.customer import (
+    AuditEventDTO,
+    AuditEventPageDTO,
     OrganizationDTO,
     PaymentDTO,
     PaymentHistoryDTO,
@@ -100,4 +104,44 @@ def get_payment_history(
     )
     return PaymentHistoryDTO(
         items=[PaymentDTO.model_validate(payment) for payment in payments]
+    )
+
+
+def get_audit_events(
+    session: Session,
+    context: CallerContext,
+    *,
+    start_at: datetime | None = None,
+    end_at: datetime | None = None,
+    actor_user_id: UUID | None = None,
+    target_user_id: UUID | None = None,
+    event_type: str | None = None,
+    limit: int,
+) -> AuditEventPageDTO:
+    require_context(context)
+    # 조직 범위는 인증 맥락으로만 정하고 나머지 인자는 결과를 좁히는 필터다.
+    conditions = [AuditEvent.organization_id == context.organization_id]
+    if start_at is not None:
+        conditions.append(AuditEvent.occurred_at >= start_at)
+    if end_at is not None:
+        conditions.append(AuditEvent.occurred_at <= end_at)
+    if actor_user_id is not None:
+        conditions.append(AuditEvent.actor_user_id == actor_user_id)
+    if target_user_id is not None:
+        conditions.append(AuditEvent.target_user_id == target_user_id)
+    if event_type is not None:
+        conditions.append(AuditEvent.event_type == event_type)
+    total = session.scalar(
+        select(func.count()).select_from(AuditEvent).where(*conditions)
+    )
+    events = session.scalars(
+        select(AuditEvent)
+        .where(*conditions)
+        .order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.asc())
+        .limit(limit)
+    )
+    return AuditEventPageDTO(
+        items=[AuditEventDTO.model_validate(event) for event in events],
+        total_count=total,
+        truncated=total > limit,
     )

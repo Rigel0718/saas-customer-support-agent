@@ -286,7 +286,7 @@ def test_workflow_output_failures(stub_tools, output, stage, reason):
         failure_stage=stage, failure_reason=reason
     )
     assert len(fake.calls) == 1
-    assert sum(t.event_type == "tool_result" for t in traces) == 7
+    assert sum(t.event_type == "tool_result" for t in traces) == 9
     assert sum(t.event_type == "llm_response" for t in traces) == 1
 
 
@@ -566,7 +566,7 @@ def test_success_metadata_is_null_and_requests_unchanged(service_without_db, mod
     assert len(fake.calls) == 1
     assert fake.calls[0]["text"]["format"]["schema"] == DiagnosisDTO.model_json_schema()
     assert "failure_metadata" not in json.dumps(fake.calls)
-    assert sum(t.event_type == "tool_result" for t in result.traces) == (7 if mode == "workflow" else 0)
+    assert sum(t.event_type == "tool_result" for t in result.traces) == (9 if mode == "workflow" else 0)
 
 
 def test_legacy_failure_does_not_invent_metadata(service_without_db, monkeypatch):

@@ -1,0 +1,6 @@
+{
+  "document_id": "workspace_access",
+  "title": "멤버 관리 접근 조건과 변경 이력 해석",
+  "keywords": ["접근", "멤버 관리", "역할", "변경 이력", "audit", "role_changed", "subscription_status_changed", "past_due"],
+  "content": "멤버 관리 기능(팀원 추가·제거·역할 관리)은 owner/admin 역할과 subscription status=active를 모두 필요로 한다. member 역할이거나 subscription status가 past_due/expired/canceled이면 사용할 수 없다. Audit Event는 변경 시점과 행위자(actor_user_id, null은 system)의 근거이며 현재 역할과 subscription 상태는 사용자·조직 조회로 확인해 대조한다. 관찰된 이벤트로 확인되지 않은 변경을 추정하지 않고, 오래전 변경을 최근 문제의 원인으로 단정하지 않는다. 역할 복구나 상태 변경을 수행하지 않고 조직 owner/admin에게 확인을 안내한다."
+}

@@ -33,7 +33,7 @@ def test_registration_without_router():
         [
             sys.executable,
             "-c",
-            "from app.models import Base; import sys; assert len(Base.metadata.tables)==7; assert 'app.api.routes' not in sys.modules",
+            "from app.models import Base; import sys; assert len(Base.metadata.tables)==8; assert 'app.api.routes' not in sys.modules",
         ],
         check=True,
     )

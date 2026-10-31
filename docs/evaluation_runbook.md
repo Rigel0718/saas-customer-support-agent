@@ -159,6 +159,22 @@ Calibration 일치율은 전체 확정 Human Label 수를 분모로 하며 Judge
 
 이전 Calibration 결과는 새 기준으로 재계산하거나 자동 승격하지 않는다. 이전 결과에 criteria_version/coverage가 없으면 적용 정보에 null과 미기록 한계를 표시하며 새 검증 범위를 추정하지 않는다. 기존 파일은 수정하지 않는다. 입력의 calibration_version, 검토의 examples_review_version, 통과 조건의 criteria_version은 서로 다른 버전이고, JSON 형식 schema_version은 additive 확장으로 calibration-v1을 유지한다.
 
+## 접근 상실 파일럿 (access-audit-environment)
+
+기존 API DB에서 새 코드를 쓰기 전에 `migrations/004_audit_events.sql`을 수동 적용한다. 테이블만 추가하며 기존 데이터는 바꾸지 않는다. 새 테스트/Evaluation schema는 ORM 초기화로 생성된다.
+
+파일럿은 invite 평가와 분리된 스크립트다. 채점하지 않는다. 결과는 invite 평가처럼 `.evaluation-results/access-<실행 수>-v<버전>/`에 저장한다(예: `access-16-v2`, 다음 버전 번호는 자동 결정, `--output-dir`로 지정 가능). `manifest.json`은 실행 조건(모델·Timeout·Workflow 선조회 범위·seed·N·plan·코드/정책 출처), `executions.json`은 실행별 진단·Trace·호출 수·Token·Latency와 Workflow Audit 선조회의 `returned`/`total_count`/`truncated`, `summary.json`은 모드·모드×N·Case×모드×N별 완료/실패·outcome·지표 통계다. Judge 채점이 없으므로 `judgments.json`은 만들지 않는다. `--allow-live-diagnosis` 없이 실행하면 DB 생성과 모델 호출 전에 중단한다.
+
+```bash
+uv run --env-file .env python -m scripts.access_pilot --noise 50,5000 --cases A01,A02,A03,A04 --repetitions 1 --seed 7 --llm-request-timeout-seconds 30 --execution-timeout-seconds 60 --allow-live-diagnosis
+```
+
+기본값(4 Case × 2 N × 2 모드 × 1회)은 실행 16회다. Workflow는 N이 클수록 최대 500건 선조회로 입력 Token이 늘어나므로(500건 ≈ 수만 tokens) 실행 전 비용을 확인한다. 같은 seed·N·Case는 같은 노이즈를 만든다.
+
+GT는 `evaluation/data/access_gt.json`(access-gt-v1)이며 실행 전에 검토·동결한다. 원인 어휘는 `role_demoted`, `subscription_past_due`와 제외 원인(`member_limit_reached`, `confirmed_service_outage`, `other_user_role_change`, `old_role_change`)이다. `labeling_rules`가 판정 규칙이다: 막는 현재 조건을 원인으로 명시해야 하고, 변경 시각·행위자 생략은 오답이 아니며, 존재하는 원인 이벤트를 없다고 단정하는 등 관찰과 모순되는 주장은 오답이다. 실행 결과를 본 뒤 GT를 바꾸면 버전을 올린다. 아직 access용 Judge는 없으므로 정답 여부는 GT 기준 사람 라벨로 정한다.
+
+Timeout은 1차 평가와 같은 요청 30초·실행 Budget 60초를 명시한다. 기본 요청 Timeout 20초에서는 Workflow의 단일 LLM 호출이 노이즈가 적어도 Timeout으로 실패했다(`access-16-v1`, 8건 중 7건).
+
 ## 매번 사용하는 평가 실행 명령
 
 저장소 루트에서 `uv run --env-file .env`로 환경변수를 프로세스에 주입한다. PostgreSQL을 중지했다면 위 `docker compose ... up` 명령으로 다시 기동하고, DB 생성은 반복하지 않는다. `plan`과 테스트는 실제 LLM을 호출하지 않는다. `run --allow-live-diagnosis`는 진단 비용, `calibrate/judge --allow-live-judge`는 Judge 비용이 발생한다. 두 허용 옵션은 서로 대체되지 않는다. 옵션 없이 실행하면 외부 호출 전에 중단한다. 다음 실제 실행 명령들은 구현 검증 중 자동 실행하지 않았다.
