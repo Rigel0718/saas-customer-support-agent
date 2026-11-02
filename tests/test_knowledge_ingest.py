@@ -393,6 +393,7 @@ def test_references_are_normalized():
         "https://langfuse.com/ko/docs/self-host/ plus #12, "
         "https://langfuse.com/self-hosting/configuration?x=1, "
         "https://github.com/langfuse/langfuse/discussions/34 and "
+        "https://github.com/orgs/langfuse/discussions/56#discussioncomment-1 and "
         "https://github.com/other/repo/issues/99 and color #fff"
     )
     assert document_references(SOURCE, text) == [
@@ -400,7 +401,7 @@ def test_references_are_normalized():
         "docs/tracing/overview",
         "self-hosting/configuration",
     ]
-    assert thread_references(SOURCE, text) == [12, 34]
+    assert thread_references(SOURCE, text) == [12, 34, 56]
 
 
 def candidate_data():

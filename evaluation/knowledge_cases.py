@@ -13,8 +13,11 @@ HASH_REFERENCE = re.compile(r"(?<![\w/&])#(\d+)\b")
 
 
 def thread_references(source: GitHubSource, text: str) -> list[int]:
+    owner = source.threads_repo.split("/", 1)[0]
+    # 저장소 링크와 조직 단위 Discussion 링크(github.com/orgs/<owner>/discussions/N).
     url = re.compile(
-        rf"https?://github\.com/{re.escape(source.threads_repo)}/(?:issues|discussions)/(\d+)"
+        rf"https?://github\.com/(?:{re.escape(source.threads_repo)}/(?:issues|discussions)"
+        rf"|orgs/{re.escape(owner)}/discussions)/(\d+)"
     )
     numbers = {int(n) for n in url.findall(text)}
     numbers |= {int(n) for n in HASH_REFERENCE.findall(url.sub("", text))}
