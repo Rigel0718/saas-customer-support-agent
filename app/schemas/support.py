@@ -124,6 +124,10 @@ FAILURE_REASONS = {
     "evidence_reference": {"invalid_trace_reference", "no_successful_observation"},
     "policy_reference": {"invalid_policy_reference", "unobserved_policy_document"},
     "observation_validation": {"invalid_observation"},
+    "answer_json": {"invalid_json"},
+    "answer_schema": {"validation_error"},
+    "citation_reference": {"invalid_citation_reference", "unobserved_citation"},
+    "workflow_queries": {"invalid_queries"},
 }
 
 
@@ -169,6 +173,10 @@ class FailureMetadata(Schema):
         "evidence_reference",
         "policy_reference",
         "observation_validation",
+        "answer_json",
+        "answer_schema",
+        "citation_reference",
+        "workflow_queries",
     ]
     failure_reason: Literal[
         "not_completed",
@@ -183,6 +191,9 @@ class FailureMetadata(Schema):
         "invalid_policy_reference",
         "unobserved_policy_document",
         "invalid_observation",
+        "invalid_citation_reference",
+        "unobserved_citation",
+        "invalid_queries",
     ]
     field_path: str | None = None
 
@@ -191,10 +202,11 @@ class FailureMetadata(Schema):
     def known_field_path(cls, value: str | None) -> str | None:
         if value is not None and re.fullmatch(
             r"(?:outcome|summary|(?:causes|next_actions)(?:\[[0-9]+\])?|"
-            r"evidence(?:\[[0-9]+\](?:\.(?:trace_sequence|policy_document_id|statement))?)?)",
+            r"evidence(?:\[[0-9]+\](?:\.(?:trace_sequence|policy_document_id|statement))?)?|"
+            r"answer|citations(?:\[[0-9]+\](?:\.(?:trace_sequence|source|ref))?)?)",
             value,
         ) is None:
-            raise ValueError("Invalid diagnosis field path")
+            raise ValueError("Invalid output field path")
         return value
 
     @model_validator(mode="after")
