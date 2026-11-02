@@ -1,6 +1,7 @@
 from app.models.audit import AuditEvent
 from app.models.base import Base
 from app.models.customer import Organization, Payment, Subscription, User
+from app.models.knowledge import KnowledgeDocument, KnowledgePost, KnowledgeThread
 from app.models.support import AgentTrace, Diagnosis, SupportRequest
 
 __all__ = [
@@ -13,4 +14,7 @@ __all__ = [
     "AgentTrace",
     "Diagnosis",
     "SupportRequest",
+    "KnowledgeDocument",
+    "KnowledgePost",
+    "KnowledgeThread",
 ]

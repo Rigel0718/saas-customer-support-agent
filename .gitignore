@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 .smoke-results/
 .evaluation-results/
+.knowledge/
