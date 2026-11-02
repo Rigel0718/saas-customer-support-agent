@@ -18,6 +18,7 @@ from openai import (
     RateLimitError,
     UnprocessableEntityError,
 )
+from pydantic import BaseModel
 
 from app.config import Settings
 from app.diagnosis.runtime import ExecutionBudget, ExecutionFailure, add_trace
@@ -107,6 +108,8 @@ def call_model(
     step: int,
     create: Callable | None = None,
     now: Callable = lambda: datetime.now(timezone.utc),
+    output_schema: type[BaseModel] = DiagnosisDTO,
+    schema_name: str = "support_diagnosis",
     **request_options,
 ) -> dict:
     timeout = min(settings.llm_request_timeout_seconds, budget.remaining())
@@ -128,9 +131,9 @@ def call_model(
             text={
                 "format": {
                     "type": "json_schema",
-                    "name": "support_diagnosis",
+                    "name": schema_name,
                     "strict": True,
-                    "schema": DiagnosisDTO.model_json_schema(),
+                    "schema": output_schema.model_json_schema(),
                 }
             },
             **request_options,
